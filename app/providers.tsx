@@ -5,7 +5,7 @@ import { sepolia } from "@starknet-react/chains";
 
 function rpc() {
   return {
-    nodeUrl: "https://starknet-sepolia.public.blastapi.io/rpc/v0_7",
+    nodeUrl: "https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_7/demo",
   };
 }
 
