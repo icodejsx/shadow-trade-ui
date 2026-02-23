@@ -2,194 +2,255 @@
 
 import { useAccount, useConnect, useDisconnect } from "@starknet-react/core";
 import { useReadContract, useSendTransaction } from "@starknet-react/core";
-import { SHADOW_TRADE_ADDRESS, SHADOW_TRADE_ABI, SBTC_ADDRESS, SBTC_ABI } from "@/constants/contracts";
+import {
+  SHADOW_TRADE_ADDRESS,
+  SHADOW_TRADE_ABI,
+  SBTC_ADDRESS,
+} from "@/constants/contracts";
 import { useState, useEffect } from "react";
 import { hash } from "starknet";
+
+function felt252ToString(felt: unknown): string {
+  if (felt === undefined || felt === null) return "BTC > 100k?";
+  try {
+    const hex = BigInt(felt as bigint).toString(16);
+    const padded = hex.length % 2 === 0 ? hex : "0" + hex;
+    let str = "";
+    for (let i = 0; i < padded.length; i += 2) {
+      const code = parseInt(padded.slice(i, i + 2), 16);
+      if (code > 31 && code < 127) str += String.fromCharCode(code);
+    }
+    return str || "BTC > 100k?";
+  } catch {
+    return "BTC > 100k?";
+  }
+}
+
+function formatsBTC(raw: unknown): string {
+  if (!raw) return "0";
+  try {
+    const val = BigInt(raw as bigint);
+    if (val === 0n) return "0";
+    return (val / BigInt("1000000000000000000")).toString();
+  } catch {
+    return "0";
+  }
+}
 
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
-  const { sendAsync } = useSendTransaction({});
+  const { sendAsync } = useSendTransaction({ calls: [] });
 
   const [vote, setVote] = useState<"1" | "2">("1");
   const [secret, setSecret] = useState("");
   const [stake, setStake] = useState("100");
   const [savedSecret, setSavedSecret] = useState("");
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+  const [txStatus, setTxStatus] = useState<string | null>(null);
 
-  // Read market info
-  const { data: marketInfo } = useReadContract({
-    address: SHADOW_TRADE_ADDRESS,
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("shadowtrade_secret");
+    if (saved) setSavedSecret(saved);
+  }, []);
+
+  const { data: marketRaw } = useReadContract({
+    address: SHADOW_TRADE_ADDRESS as `0x${string}`,
     abi: SHADOW_TRADE_ABI,
     functionName: "get_market_info",
     args: [],
     watch: true,
   });
 
-  // Read pool info
-  const { data: poolInfo } = useReadContract({
-    address: SHADOW_TRADE_ADDRESS,
+  const { data: poolRaw } = useReadContract({
+    address: SHADOW_TRADE_ADDRESS as `0x${string}`,
     abi: SHADOW_TRADE_ABI,
     functionName: "get_pool_info",
     args: [],
     watch: true,
   });
 
-  // Read user info
-  const { data: userInfo } = useReadContract({
-    address: SHADOW_TRADE_ADDRESS,
+  const { data: userRaw } = useReadContract({
+    address: SHADOW_TRADE_ADDRESS as `0x${string}`,
     abi: SHADOW_TRADE_ABI,
     functionName: "get_user_info",
     args: address ? [address] : undefined,
+    enabled: !!address,
     watch: true,
   });
 
-  // Load saved secret from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("shadowtrade_secret");
-    if (saved) setSavedSecret(saved);
-  }, []);
+    console.log("marketRaw:", marketRaw);
+    console.log("poolRaw:", poolRaw);
+    console.log("userRaw:", userRaw);
+  }, [marketRaw, poolRaw, userRaw]);
+
+  const m = marketRaw as Record<string, unknown> | undefined;
+  const p = poolRaw as Record<string, unknown> | undefined;
+  const u = userRaw as Record<string, unknown> | undefined;
+
+  const question      = m ? felt252ToString(m.question)  : "Loading...";
+  const commitDeadline = m ? Number(m.commit_deadline)   : 0;
+  const revealDeadline = m ? Number(m.reveal_deadline)   : 0;
+  const resolved      = m ? Boolean(m.resolved)          : false;
+  const outcome       = m ? Number(m.outcome)            : 0;
+
+  const yesVotes = p ? Number(p.yes_votes)    : 0;
+  const noVotes  = p ? Number(p.no_votes)     : 0;
+  const yesPool  = p ? formatsBTC(p.yes_pool) : "0";
+  const noPool   = p ? formatsBTC(p.no_pool)  : "0";
+
+  const hasCommitted = u ? Boolean(u.has_committed) : false;
+  const hasRevealed  = u ? Boolean(u.has_revealed)  : false;
+  const hasClaimed   = u ? Boolean(u.has_claimed)   : false;
+
+  const phase =
+    commitDeadline === 0    ? "Loading"
+    : now <= commitDeadline ? "Commit"
+    : now <= revealDeadline ? "Reveal"
+    : "Ended";
+
+  const formatTimeLeft = (deadline: number) => {
+    const diff = deadline - now;
+    if (diff <= 0) return "Ended";
+    const mins = Math.floor(diff / 60);
+    const secs = diff % 60;
+    return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+  };
 
   const handleCommit = async () => {
-    if (!secret || !stake) return alert("Enter secret and stake");
+    if (!secret.trim()) return alert("Enter a secret (e.g. 0x7a3f...)");
+    if (!stake || Number(stake) <= 0) return alert("Enter a stake > 0");
 
-    // Generate commitment hash
-    const voteNum = vote === "1" ? "0x1" : "0x2";
-    const commitment = hash.computePedersenHash(voteNum, secret);
+    const voteHex = vote === "1" ? "0x1" : "0x2";
+    const commitment = hash.computePedersenHash(voteHex, secret);
 
-    // Save secret
     localStorage.setItem("shadowtrade_secret", secret);
+    localStorage.setItem("shadowtrade_vote", vote);
     setSavedSecret(secret);
 
     try {
-      // Approve + Commit in multicall
-      await sendAsync({
-        calls: [
-          {
-            contractAddress: SBTC_ADDRESS,
-            entrypoint: "approve",
-            calldata: [SHADOW_TRADE_ADDRESS, stake, "0"],
-          },
-          {
-            contractAddress: SHADOW_TRADE_ADDRESS,
-            entrypoint: "commit",
-            calldata: [commitment, stake, "0"],
-          },
-        ],
-      });
-
-      alert("Committed! Secret saved: " + secret);
+      setTxStatus("⏳ Approving and committing... confirm in wallet");
+      await sendAsync([
+        {
+          contractAddress: SBTC_ADDRESS,
+          entrypoint: "approve",
+          calldata: [SHADOW_TRADE_ADDRESS, stake, "0"],
+        },
+        {
+          contractAddress: SHADOW_TRADE_ADDRESS,
+          entrypoint: "commit",
+          calldata: [commitment, stake, "0"],
+        },
+      ]);
+      setTxStatus("✅ Committed! Secret saved. Come back during Reveal phase.");
     } catch (e) {
       console.error(e);
-      alert("Transaction failed");
+      setTxStatus("❌ Transaction failed. See console for details.");
     }
   };
 
   const handleReveal = async () => {
-    if (!savedSecret) return alert("No secret found. Did you commit?");
+    const storedSecret = localStorage.getItem("shadowtrade_secret");
+    const storedVote   = localStorage.getItem("shadowtrade_vote") || vote;
+    if (!storedSecret) return alert("No secret found! Did you commit from this browser?");
 
     try {
-      await sendAsync({
-        calls: [
-          {
-            contractAddress: SHADOW_TRADE_ADDRESS,
-            entrypoint: "reveal",
-            calldata: [vote === "1" ? "1" : "2", savedSecret],
-          },
-        ],
-      });
-
-      alert("Revealed!");
+      setTxStatus("⏳ Revealing vote... confirm in wallet");
+      await sendAsync([
+        {
+          contractAddress: SHADOW_TRADE_ADDRESS,
+          entrypoint: "reveal",
+          calldata: [storedVote === "1" ? "1" : "2", storedSecret],
+        },
+      ]);
+      setTxStatus("✅ Vote revealed successfully!");
     } catch (e) {
       console.error(e);
-      alert("Transaction failed");
+      setTxStatus("❌ Reveal failed. See console.");
     }
   };
 
   const handleClaim = async () => {
     try {
-      await sendAsync({
-        calls: [
-          {
-            contractAddress: SHADOW_TRADE_ADDRESS,
-            entrypoint: "claim",
-            calldata: [],
-          },
-        ],
-      });
-
-      alert("Claimed winnings!");
+      setTxStatus("⏳ Claiming winnings... confirm in wallet");
+      await sendAsync([
+        {
+          contractAddress: SHADOW_TRADE_ADDRESS,
+          entrypoint: "claim",
+          calldata: [],
+        },
+      ]);
+      setTxStatus("✅ Winnings claimed!");
     } catch (e) {
       console.error(e);
-      alert("Transaction failed");
+      setTxStatus("❌ Claim failed. See console.");
     }
   };
 
-  // Parse market data
-// Parse market data with proper types
-// Parse market data with proper types
-const question = marketInfo ? String((marketInfo as any)[0]) : "Loading...";
-const commitDeadline = marketInfo ? Number((marketInfo as any)[1]) : 0;
-const revealDeadline = marketInfo ? Number((marketInfo as any)[2]) : 0;
-const resolved = marketInfo ? (marketInfo as any)[3] : false;
-const outcome = marketInfo ? Number((marketInfo as any)[4]) : 0;
-
-const yesVotes = poolInfo ? Number((poolInfo as any)[0]) || 0 : 0;
-const noVotes = poolInfo ? Number((poolInfo as any)[1]) || 0 : 0;
-
-const hasCommitted = userInfo ? (userInfo as any)[0] : false;
-const hasRevealed = userInfo ? (userInfo as any)[1] : false;
-const hasClaimed = userInfo ? (userInfo as any)[2] : false;
-
-const [now, setNow] = useState(Math.floor(Date.now() / 1000));
-
-useEffect(() => {
-  const interval = setInterval(() => {
-    setNow(Math.floor(Date.now() / 1000));
-  }, 1000);
-  return () => clearInterval(interval);
-}, []);
-
-const phase =
-  now <= commitDeadline
-    ? "Commit"
-    : now <= revealDeadline
-    ? "Reveal"
-    : "Ended";
+  const phaseStyle: Record<string, string> = {
+    Commit:  "text-yellow-400 bg-yellow-900/20 border-yellow-500/30",
+    Reveal:  "text-blue-400 bg-blue-900/20 border-blue-500/30",
+    Ended:   "text-red-400 bg-red-900/20 border-red-500/30",
+    Loading: "text-gray-400 bg-white/5 border-white/10",
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-5xl font-bold mb-2 text-center bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
-          ShadowTrade
-        </h1>
-        <p className="text-center text-gray-400 mb-8">
-          Private BTC Prediction Market on Starknet
-        </p>
+    <div className="min-h-screen bg-[#0a0a0f] text-white p-4 md:p-8">
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-purple-900/20 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-pink-900/10 rounded-full blur-3xl" />
+      </div>
 
-        {/* Wallet Connection */}
-        <div className="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-500">
+      <div className="relative max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2 bg-purple-900/30 border border-purple-500/30 rounded-full px-4 py-1 text-sm text-purple-300 mb-4">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" />
+            Live on Starknet Sepolia
+          </div>
+          <h1 className="text-5xl font-black mb-2 bg-gradient-to-r from-purple-400 via-pink-400 to-purple-600 bg-clip-text text-transparent">
+            ShadowTrade
+          </h1>
+          <p className="text-gray-400 text-sm">
+            Private BTC Prediction Market • Commit-Reveal Protocol
+          </p>
+        </div>
+
+        {/* Wallet */}
+        <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5 mb-4">
           {!isConnected ? (
-            <div className="space-y-2">
-              <p className="text-gray-300 mb-3">Connect your wallet to participate</p>
-              {connectors.map((connector) => (
-                <button
-                  key={connector.id}
-                  onClick={() => connect({ connector })}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition"
-                >
-                  Connect {connector.name}
-                </button>
-              ))}
+            <div>
+              <p className="text-gray-300 font-medium mb-3">Connect wallet to participate</p>
+              <div className="flex flex-col gap-2">
+                {connectors.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => connect({ connector: c })}
+                    className="w-full bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all"
+                  >
+                    Connect {c.name}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="flex justify-between items-center">
-              <p className="text-gray-300">
-                Connected: {address?.slice(0, 6)}...{address?.slice(-4)}
-              </p>
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Connected</p>
+                <p className="font-mono text-sm text-green-400">
+                  {address?.slice(0, 10)}...{address?.slice(-6)}
+                </p>
+              </div>
               <button
                 onClick={() => disconnect()}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                className="text-sm text-gray-400 hover:text-red-400 border border-white/10 hover:border-red-400/30 rounded-lg px-3 py-1.5 transition-all"
               >
                 Disconnect
               </button>
@@ -197,137 +258,200 @@ const phase =
           )}
         </div>
 
-        {/* Market Info */}
-        <div className="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-500">
-          <h2 className="text-2xl font-bold mb-4">Market Question</h2>
-          <p className="text-xl text-purple-300 mb-4">{question}</p>
-          <div className="grid grid-cols-2 gap-4 text-sm">
+        {/* Market Card */}
+        <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5 mb-4">
+          <div className="flex justify-between items-start mb-4">
             <div>
-              <p className="text-gray-400">Phase</p>
-              <p className="text-lg font-bold text-purple-400">{phase}</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Market Question</p>
+              <h2 className="text-xl font-bold">{question}</h2>
             </div>
-            <div>
-              <p className="text-gray-400">Status</p>
-              <p className="text-lg font-bold">{resolved ? "Resolved" : "Active"}</p>
+            <span className={`text-xs font-bold rounded-lg px-3 py-1.5 border ${phaseStyle[phase] ?? phaseStyle.Loading}`}>
+              {phase} Phase
+            </span>
+          </div>
+
+          {phase === "Commit" && (
+            <div className="bg-yellow-900/10 border border-yellow-500/20 rounded-xl p-3 mb-4">
+              <p className="text-sm text-yellow-300">
+                ⏱ Commit closes in:{" "}
+                <span className="font-mono font-bold">{formatTimeLeft(commitDeadline)}</span>
+              </p>
             </div>
-            <div>
-              <p className="text-gray-400">YES Votes</p>
-              <p className="text-lg font-bold text-green-400">{yesVotes}</p>
+          )}
+          {phase === "Reveal" && (
+            <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-3 mb-4">
+              <p className="text-sm text-blue-300">
+                ⏱ Reveal closes in:{" "}
+                <span className="font-mono font-bold">{formatTimeLeft(revealDeadline)}</span>
+              </p>
             </div>
-            <div>
-              <p className="text-gray-400">NO Votes</p>
-              <p className="text-lg font-bold text-red-400">{noVotes}</p>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-green-900/20 border border-green-500/20 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-1">YES Pool</p>
+              <p className="text-lg font-bold text-green-400">{yesVotes} votes</p>
+              <p className="text-xs text-gray-500">{yesPool} sBTC</p>
+            </div>
+            <div className="bg-red-900/20 border border-red-500/20 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-1">NO Pool</p>
+              <p className="text-lg font-bold text-red-400">{noVotes} votes</p>
+              <p className="text-xs text-gray-500">{noPool} sBTC</p>
             </div>
           </div>
+
           {resolved && (
-            <div className="mt-4 p-3 bg-purple-900 rounded">
-              <p className="text-center font-bold">
-                Winner: {outcome === 1 ? "YES" : "NO"}
-              </p>
+            <div className="mt-4 bg-purple-900/30 border border-purple-500/30 rounded-xl p-4 text-center">
+              <p className="text-purple-300 text-sm mb-1">Market Resolved</p>
+              <p className="text-2xl font-black">{outcome === 1 ? "✅ YES wins!" : "❌ NO wins!"}</p>
             </div>
           )}
         </div>
 
-        {/* Actions */}
+        {/* Action Card */}
         {isConnected && (
-          <div className="bg-gray-800 rounded-lg p-6 border border-purple-500">
-            <h2 className="text-2xl font-bold mb-4">Your Actions</h2>
+          <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5 mb-4">
+            <h3 className="font-bold text-gray-200 mb-4">Your Position</h3>
 
-            {/* Commit Phase */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              <span className={`text-xs px-2 py-1 rounded-full border ${hasCommitted ? "bg-green-900/30 border-green-500/30 text-green-400" : "bg-white/5 border-white/10 text-gray-500"}`}>
+                {hasCommitted ? "✓ Committed" : "Not committed"}
+              </span>
+              <span className={`text-xs px-2 py-1 rounded-full border ${hasRevealed ? "bg-blue-900/30 border-blue-500/30 text-blue-400" : "bg-white/5 border-white/10 text-gray-500"}`}>
+                {hasRevealed ? "✓ Revealed" : "Not revealed"}
+              </span>
+              <span className={`text-xs px-2 py-1 rounded-full border ${hasClaimed ? "bg-purple-900/30 border-purple-500/30 text-purple-400" : "bg-white/5 border-white/10 text-gray-500"}`}>
+                {hasClaimed ? "✓ Claimed" : "Not claimed"}
+              </span>
+            </div>
+
+            {/* COMMIT FORM */}
             {phase === "Commit" && !hasCommitted && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-gray-300 mb-2">Your Prediction</label>
-                  <div className="flex gap-4">
+                  <label className="block text-sm text-gray-400 mb-2">Your Prediction</label>
+                  <div className="flex gap-3">
                     <button
                       onClick={() => setVote("1")}
-                      className={`flex-1 py-3 rounded-lg font-bold transition ${
-                        vote === "1"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-700 text-gray-400"
-                      }`}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-all border ${vote === "1" ? "bg-green-600 border-green-500 text-white" : "bg-white/5 border-white/10 text-gray-400 hover:border-green-500/40"}`}
                     >
-                      YES
+                      YES ✅
                     </button>
                     <button
                       onClick={() => setVote("2")}
-                      className={`flex-1 py-3 rounded-lg font-bold transition ${
-                        vote === "2"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-700 text-gray-400"
-                      }`}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-all border ${vote === "2" ? "bg-red-600 border-red-500 text-white" : "bg-white/5 border-white/10 text-gray-400 hover:border-red-500/40"}`}
                     >
-                      NO
+                      NO ❌
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-2">
-                    Secret (save this!)
+                  <label className="block text-sm text-gray-400 mb-1">
+                    Secret <span className="text-yellow-400 text-xs">⚠️ You need this to reveal!</span>
                   </label>
                   <input
                     type="text"
                     value={secret}
                     onChange={(e) => setSecret(e.target.value)}
-                    placeholder="0x123abc..."
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white"
+                    placeholder="e.g. 0x7a3f9c2b..."
+                    className="w-full bg-white/5 border border-white/10 focus:border-purple-500 rounded-xl px-4 py-3 text-white placeholder-gray-600 outline-none transition-all font-mono text-sm"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Private salt — your vote is hidden until reveal.</p>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-2">
-                    Stake (sBTC)
-                  </label>
+                  <label className="block text-sm text-gray-400 mb-1">Stake (sBTC)</label>
                   <input
                     type="number"
                     value={stake}
                     onChange={(e) => setStake(e.target.value)}
+                    min="1"
                     placeholder="100"
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white"
+                    className="w-full bg-white/5 border border-white/10 focus:border-purple-500 rounded-xl px-4 py-3 text-white placeholder-gray-600 outline-none transition-all"
                   />
                 </div>
 
                 <button
                   onClick={handleCommit}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition"
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all"
                 >
-                  Commit Vote
+                  🔒 Commit Vote
                 </button>
               </div>
             )}
 
-            {/* Reveal Phase */}
+            {phase === "Commit" && hasCommitted && (
+              <div className="bg-yellow-900/10 border border-yellow-500/20 rounded-xl p-4 text-center">
+                <p className="text-yellow-300 font-medium">✓ Commitment recorded</p>
+                <p className="text-gray-400 text-sm mt-1">Wait for the Reveal phase, then return here.</p>
+              </div>
+            )}
+
             {phase === "Reveal" && hasCommitted && !hasRevealed && (
-              <div className="space-y-4">
-                <p className="text-gray-300">
-                  Saved Secret: {savedSecret || "Not found"}
-                </p>
+              <div className="space-y-3">
+                <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-3 text-sm">
+                  <p className="text-blue-300">
+                    Saved secret:{" "}
+                    <span className="font-mono text-xs text-gray-400">
+                      {savedSecret ? savedSecret.slice(0, 16) + "..." : "⚠️ Not found — same browser required"}
+                    </span>
+                  </p>
+                </div>
                 <button
                   onClick={handleReveal}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition"
+                  className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all"
                 >
-                  Reveal Vote
+                  👁️ Reveal My Vote
                 </button>
               </div>
             )}
 
-            {/* Claim Phase */}
             {resolved && hasRevealed && !hasClaimed && (
               <button
                 onClick={handleClaim}
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
+                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all"
               >
-                Claim Winnings
+                💰 Claim Winnings
               </button>
             )}
 
-            {/* Status Messages */}
-            {hasCommitted && <p className="text-green-400">✓ You have committed</p>}
-            {hasRevealed && <p className="text-green-400">✓ You have revealed</p>}
-            {hasClaimed && <p className="text-green-400">✓ You have claimed</p>}
+            {hasClaimed && (
+              <div className="bg-green-900/20 border border-green-500/20 rounded-xl p-4 text-center">
+                <p className="text-green-300 font-bold text-lg">🎉 Winnings Claimed!</p>
+              </div>
+            )}
+
+            {phase === "Ended" && !resolved && (
+              <div className="bg-white/5 rounded-xl p-4 text-center">
+                <p className="text-gray-400 text-sm">Market ended. Waiting for admin to resolve.</p>
+              </div>
+            )}
           </div>
         )}
+
+        {txStatus && (
+          <div className={`rounded-xl p-4 text-sm text-center border mb-4 ${
+            txStatus.startsWith("✅") ? "bg-green-900/20 border-green-500/30 text-green-300"
+            : txStatus.startsWith("❌") ? "bg-red-900/20 border-red-500/30 text-red-300"
+            : "bg-purple-900/20 border-purple-500/30 text-purple-300 animate-pulse"
+          }`}>
+            {txStatus}
+          </div>
+        )}
+
+        <div className="bg-white/3 border border-white/5 rounded-2xl p-5">
+          <h3 className="text-sm font-semibold text-gray-300 mb-3">🛡️ How the Privacy Works</h3>
+          <div className="space-y-2 text-xs text-gray-500">
+            <p><span className="text-purple-400 font-medium">1. Commit</span> — You submit <code className="text-gray-400 bg-white/5 px-1 rounded">hash(vote, secret)</code>. Nobody sees your vote on-chain.</p>
+            <p><span className="text-blue-400 font-medium">2. Reveal</span> — After the commit window, you reveal vote + secret. Contract verifies the hash matches.</p>
+            <p><span className="text-green-400 font-medium">3. Claim</span> — Winners split the losers&apos; stake proportionally.</p>
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-gray-600 mt-6 pb-8">
+          Built for Starknet Resolve Hackathon • Powered by Pedersen Hash
+        </p>
       </div>
     </div>
   );
