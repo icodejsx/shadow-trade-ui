@@ -5,6 +5,8 @@ import { useReadContract, useSendTransaction } from "@starknet-react/core";
 import { SHADOW_TRADE_ABI, SBTC_ADDRESS } from "@/constants/contracts";
 import { useState, useEffect, useCallback } from "react";
 import { hash } from "starknet";
+import { BsRobot } from 'react-icons/bs';
+import { IoIosSearch } from "react-icons/io";
 
 // ── 14 REAL DEPLOYED CONTRACTS ──────────────────────────────────────────────
 // DEMO contract for live demo use
@@ -582,7 +584,7 @@ export default function Home() {
           </div>
           <div className="hidden md:flex flex-1 max-w-xs">
             <div className="relative w-full">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">🔍</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">{<IoIosSearch />}</span>
               <input value={searchQ} onChange={e => setSearchQ(e.target.value)}
                 placeholder="Search markets..."
                 className="w-full bg-white/5 border border-white/8 rounded-xl pl-8 pr-4 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-amber-500/30 transition-all"/>
@@ -639,7 +641,7 @@ export default function Home() {
 
         {/* AI Commentary */}
         <div className="bg-white/3 border border-white/8 rounded-2xl px-5 py-3.5 mb-5 flex items-start gap-3">
-          <span className="text-base shrink-0 mt-0.5">🤖</span>
+          <span className="text-base shrink-0 mt-0.5">{<BsRobot/>}</span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-semibold text-gray-500">AI Market Commentary</span>
@@ -671,10 +673,10 @@ export default function Home() {
                 { label: "Live Contracts", value: `${TOTAL_MARKETS}`, sub: "deployed on Starknet" },
                 { label: "Privacy",        value: "Pedersen Hash", sub: "commit-reveal protocol" },
               ].map(s => (
-                <div key={s.label} className="bg-white/3 border border-white/8 rounded-xl p-4">
-                  <p className="text-xs text-gray-600 mb-1">{s.label}</p>
+                <div key={s.label} className="bg-white/3 border  border-white/8 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 mb-1">{s.label}</p>
                   <p className="font-black text-white text-lg leading-none">{s.value}</p>
-                  <p className="text-xs text-gray-600 mt-1">{s.sub}</p>
+                  <p className="text-xs text-gray-500 mt-1">{s.sub}</p>
                 </div>
               ))}
             </div>
@@ -705,7 +707,7 @@ export default function Home() {
                       <span className={`inline-block mt-1.5 text-xs px-2 py-0.5 rounded-full border font-semibold ${
                         selectedVote==="1" ? "bg-green-500/10 border-green-500/20 text-green-400"
                         : "bg-red-500/10 border-red-500/20 text-red-400"
-                      }`}>Buying {selectedVote==="1"?"YES ✅":"NO ❌"}</span>
+                      }`}>Buying {selectedVote==="1"?"YES ":"NO "}</span>
                     )}
                   </div>
                 ) : (
@@ -755,11 +757,11 @@ export default function Home() {
                         <div className="grid grid-cols-2 gap-2">
                           <button onClick={() => setSelectedVote("1")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="1"?"bg-green-600 border-green-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-green-500/30"}`}>
-                            YES ✅
+                            YES
                           </button>
                           <button onClick={() => setSelectedVote("2")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="2"?"bg-red-600 border-red-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-red-500/30"}`}>
-                            NO ❌
+                            NO 
                           </button>
                         </div>
                         {/* Auto-generated secret — no user action needed */}
@@ -843,7 +845,7 @@ export default function Home() {
                     )}
                     {resolved && (
                       <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 text-center">
-                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":"❌ NO Won"}</p>
+                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":" NO Won"}</p>
                       </div>
                     )}
                   </div>
