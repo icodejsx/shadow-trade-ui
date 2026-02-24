@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { hash } from "starknet";
 import { BsRobot } from 'react-icons/bs';
 import { IoIosSearch } from "react-icons/io";
+import { PiCurrencyBtc } from "react-icons/pi";
 
 // ── 14 REAL DEPLOYED CONTRACTS ──────────────────────────────────────────────
 // DEMO contract for live demo use
@@ -15,7 +16,7 @@ const DEMO_CONTRACT = "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91
 const CATEGORIES = [
   {
     id: "demo",
-    icon: "🚀",
+    icon: <PiCurrencyBtc  className="text-yellow-600" />,
     title: "LIVE DEMO — Will BTC close above $60k today?",
     subtitle: "Demo market · Short window for live testing",
     vol: "$0", ends: "Today", tag: "🔴 DEMO",
@@ -202,7 +203,7 @@ function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, 
             <span className={`text-xs font-mono tabular-nums whitespace-nowrap ${
               countdown.urgent ? "text-red-400 animate-pulse" : "text-gray-500"
             }`}>
-              ⏱ {countdown.str}
+        
             </span>
           )}
         </div>
@@ -503,7 +504,7 @@ export default function Home() {
         { contractAddress: selectedAddress, entrypoint: "commit", calldata: [commitment, stake, "0"] },
       ]);
       setTxStatus("✅ Committed! Come back to reveal.");
-    } catch (e) { console.error(e); setTxStatus("❌ Failed. See console."); }
+    } catch (e) { console.error(e); setTxStatus("Failed. See console."); }
   };
 
   const handleReveal = async () => {
@@ -514,7 +515,7 @@ export default function Home() {
       setTxStatus("⏳ Revealing...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "reveal", calldata: [v==="1"?"1":"2", s] }]);
       setTxStatus("✅ Revealed!");
-    } catch (e) { console.error(e); setTxStatus("❌ Reveal failed."); }
+    } catch (e) { console.error(e); setTxStatus(" Reveal failed."); }
   };
 
   const handleClaim = async () => {
@@ -522,7 +523,7 @@ export default function Home() {
       setTxStatus("⏳ Claiming...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "claim", calldata: [] }]);
       setTxStatus("✅ Claimed!");
-    } catch (e) { console.error(e); setTxStatus("❌ Claim failed."); }
+    } catch (e) { console.error(e); setTxStatus(" Claim failed."); }
   };
 
   const filters = ["All", "Bitcoin", "Crypto Prices", "ATH", "Ending Soon"];
