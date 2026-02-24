@@ -64,6 +64,212 @@ function formatsBTC(raw: unknown): string {
   }
 }
 
+// AI Market Commentary Component — fetches real BTC price then generates analysis
+function AICommentary({ markets }: { markets: typeof MARKETS }) {
+  const [commentary, setCommentary] = useState<string>("");
+  const [btcPrice, setBtcPrice] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+
+  const fetchCommentary = async () => {
+    setLoading(true);
+    let price = 97420; // fallback
+
+    // Step 1: Fetch real BTC price from CoinGecko (no API key needed)
+    try {
+      const priceRes = await fetch(
+        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true"
+      );
+      const priceData = await priceRes.json();
+      price = Math.round(priceData.bitcoin.usd);
+      const change24h = priceData.bitcoin.usd_24h_change?.toFixed(2);
+      setBtcPrice(price);
+
+      // Step 2: Feed real price into Claude for dynamic commentary
+      const pct100 = (((price / 100000) - 1) * 100).toFixed(1);
+      const pct110 = (((price / 110000) - 1) * 100).toFixed(1);
+      const pct120 = (((price / 120000) - 1) * 100).toFixed(1);
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: `You are a sharp crypto market analyst for ShadowTrade, a privacy-first prediction market on Starknet.
+
+Current live data:
+- BTC/USD: $${price.toLocaleString()} (24h change: ${change24h}%)
+- Distance to $100k: ${pct100}%
+- Distance to $110k: ${pct110}%  
+- Distance to $120k: ${pct120}%
+- Market sentiment: 100% YES across all three ShadowTrade price targets (1 participant, early market)
+
+Write 2-3 punchy sentences of market commentary. Reference the actual current price. Be analytical — neither hype nor doom. Mention one specific insight about the privacy angle (commit-reveal means no sentiment manipulation). Sound like a real desk trader. No emojis. Max 70 words.`
+          }]
+        })
+      });
+      const data = await response.json();
+      setCommentary(data.content?.[0]?.text || "");
+    } catch {
+      // If API fails, generate rule-based commentary from real price
+      setBtcPrice(price);
+      const gap100 = ((100000 - price) / price * 100).toFixed(1);
+      if (price >= 100000) {
+        setCommentary(`BTC broke $100k — all three ShadowTrade price targets now live. The commit-reveal mechanism protected early bettors from sentiment leakage; no one could front-run the move. Eyes on $110k next.`);
+      } else {
+        setCommentary(`BTC trading at $${price.toLocaleString()}, roughly ${gap100}% below the $100k threshold. ShadowTrade participants remain unanimously bullish. Commit-reveal privacy means this sentiment wasn't visible to other traders until after the window closed — exactly the edge the protocol provides.`);
+      }
+    }
+
+    setFetched(true);
+    setLoading(false);
+    setLastUpdated(new Date().toLocaleTimeString());
+  };
+
+  // Auto-fetch on mount
+  useEffect(() => { fetchCommentary(); }, []);
+
+  return (
+    <div className="p-4 rounded-2xl border border-white/5 bg-white/2">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-semibold text-gray-300">🤖 AI Market Commentary</p>
+          {btcPrice && (
+            <span className="text-xs font-mono text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
+              BTC ${btcPrice.toLocaleString()}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={fetchCommentary}
+          disabled={loading}
+          className="text-xs text-gray-600 hover:text-gray-400 transition-colors disabled:opacity-40"
+        >
+          {loading ? "..." : `↻ ${lastUpdated || "Refresh"}`}
+        </button>
+      </div>
+      {loading && (
+        <div className="flex items-center gap-2 py-1">
+          <div className="flex gap-1">
+            {[0,1,2].map(i => (
+              <div key={i} className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+            ))}
+          </div>
+          <span className="text-xs text-gray-600">Fetching live BTC price...</span>
+        </div>
+      )}
+      {commentary && !loading && (
+        <p className="text-xs text-gray-400 leading-relaxed">{commentary}</p>
+      )}
+    </div>
+  );
+}
+
+// Create Market Component (Market Factory UI)
+function CreateMarket() {
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [commitMins, setCommitMins] = useState("30");
+  const [revealMins, setRevealMins] = useState("60");
+
+  const presets = [
+    "BTC > $105k by March?",
+    "ETH > $5k in 2026?",
+    "STRK > $1 this month?",
+    "BTC dominance > 60%?",
+  ];
+
+  return (
+    <div className="rounded-2xl border border-white/5 bg-white/2 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full p-4 flex items-center justify-between hover:bg-white/3 transition-all"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-base">🏭</span>
+          <p className="text-xs font-semibold text-gray-300">Create New Market</p>
+          <span className="text-xs bg-purple-500/10 border border-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full">Factory</span>
+        </div>
+        <span className="text-gray-600 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1.5">Market Question</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {presets.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setQuestion(p)}
+                  className={`text-xs px-2 py-1 rounded-lg border transition-all ${question === p ? "bg-amber-500/20 border-amber-500/30 text-amber-400" : "bg-white/3 border-white/10 text-gray-500 hover:text-gray-300"}`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Custom question..."
+              className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white placeholder-gray-700 outline-none text-xs transition-all"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Commit window (mins)</label>
+              <input
+                type="number"
+                value={commitMins}
+                onChange={(e) => setCommitMins(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white outline-none text-xs transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reveal window (mins)</label>
+              <input
+                type="number"
+                value={revealMins}
+                onChange={(e) => setRevealMins(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white outline-none text-xs transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="bg-black/20 rounded-xl p-3 text-xs font-mono text-gray-600 space-y-0.5">
+            <p className="text-gray-500 mb-1">sncast deploy command:</p>
+            <p className="text-green-400/70 break-all">
+              sncast deploy --network sepolia \<br/>
+              --class-hash 0x6669f... \<br/>
+              --arguments &apos;{question ? `"${question.slice(0,20)}..."` : "&lt;question&gt;"}, &lt;ts+{Number(commitMins)*60}&gt;, &lt;ts+{(Number(commitMins)+Number(revealMins))*60}&gt;, &lt;sbtc_addr&gt;&apos;
+            </p>
+          </div>
+
+          <button
+            onClick={() => {
+              const msg = `To deploy this market, run:\ndate +%s\nThen add ${Number(commitMins)*60}s for commit deadline and ${(Number(commitMins)+Number(revealMins))*60}s for reveal deadline.\n\nQuestion to encode as felt252: "${question}"`;
+              alert(msg);
+            }}
+            className="w-full bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/20 text-purple-300 font-semibold text-xs py-2.5 rounded-xl transition-all"
+          >
+            📋 Copy Deploy Instructions
+          </button>
+
+          <p className="text-xs text-gray-700 text-center">
+            Full on-chain deployment via Scarb CLI · Market Factory contract coming soon
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MarketCard({
   market,
   isSelected,
@@ -399,10 +605,10 @@ export default function Home() {
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
 
           {/* LEFT — Market list */}
-          <div className="lg:col-span-1 space-y-3">
+          <div className="lg:col-span-3 space-y-3">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-white">BTC Markets</h2>
               <span className="text-xs text-gray-500">{MARKETS.length} active</span>
@@ -417,7 +623,7 @@ export default function Home() {
             ))}
 
             {/* Privacy explainer */}
-            <div className="mt-4 p-4 rounded-2xl border border-white/5 bg-white/2">
+            <div className="mt-2 p-4 rounded-2xl border border-white/5 bg-white/2">
               <p className="text-xs font-semibold text-gray-300 mb-2">🛡️ How Privacy Works</p>
               <div className="space-y-1.5 text-xs text-gray-600">
                 <p><span className="text-amber-400">Commit</span> — Send <code className="text-gray-400">hash(vote, secret)</code>. Vote hidden.</p>
@@ -425,10 +631,17 @@ export default function Home() {
                 <p><span className="text-green-400">Claim</span> — Winners split the losing pool.</p>
               </div>
             </div>
+
+            {/* AI Market Commentary */}
+            {/* <AICommentary markets={MARKETS} /> */}
+
+            {/* Create Market */}
+            <CreateMarket />
+
           </div>
 
           {/* RIGHT — Trading panel */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-4 space-y-4">
 
             {/* Market header */}
             <div className="bg-white/3 border border-white/8 rounded-2xl p-6">
@@ -505,6 +718,8 @@ export default function Home() {
                     </span>
                   </div>
                 </div>
+
+                
 
                 {/* COMMIT */}
                 {phase === "Commit" && !hasCommitted && (
@@ -631,6 +846,8 @@ export default function Home() {
                 </div>
               </div>
             )}
+   {/* AI Market Commentary */}
+   <AICommentary markets={MARKETS} />
 
             {txStatus && (
               <div className={`rounded-xl p-4 text-sm text-center border ${
