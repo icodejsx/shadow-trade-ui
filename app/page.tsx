@@ -580,7 +580,7 @@ Write 2 punchy analytical sentences referencing the live price. Mention the comm
         </div>
 
         {/* Two-column */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
 
           {/* LEFT: Market categories */}
           <div className="lg:col-span-2">
@@ -617,10 +617,10 @@ Write 2 punchy analytical sentences referencing the live price. Mention the comm
           </div>
 
           {/* RIGHT: Trade panel */}
-          <div className="space-y-4">
+          <div className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto space-y-4 pb-6" style={{scrollbarWidth:"none", msOverflowStyle:"none"}}>
 
             {/* Trade box */}
-            <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden sticky top-20">
+            <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden">
               {/* Panel header */}
               <div className="px-5 py-4 border-b border-white/5">
                 {selectedKey ? (
