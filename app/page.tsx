@@ -2,96 +2,307 @@
 
 import { useAccount, useConnect, useDisconnect } from "@starknet-react/core";
 import { useReadContract, useSendTransaction } from "@starknet-react/core";
-import {
-  SHADOW_TRADE_ABI,
-  SBTC_ADDRESS,
-} from "@/constants/contracts";
-import { useState, useEffect } from "react";
+import { SHADOW_TRADE_ABI, SBTC_ADDRESS } from "@/constants/contracts";
+import { useState, useEffect, useCallback } from "react";
 import { hash } from "starknet";
 
-// All 3 deployed markets — update addresses after deploying each
-const MARKETS = [
+// ── DEMO CONTRACT (all markets point here until real contracts deployed) ────
+const DEMO = "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91a2027803d";
+
+// ── MARKET CATEGORIES ───────────────────────────────────────────────────────
+const CATEGORIES = [
   {
-    id: 1,
-    address: "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91a2027803d",
-    label: "BTC > $100k",
-    target: "$100,000",
-    icon: "🟡",
-    color: "yellow",
+    id: "price-targets",
+    icon: "🎯",
+    title: "What price will BTC hit in February?",
+    subtitle: "Pick your price target — private commit-reveal voting",
+    vol: "$96.6M",
+    ends: "Mar 1, 2026",
+    tag: "Trending",
+    tagColor: "text-amber-400 bg-amber-400/10 border-amber-400/20",
+    type: "multi", // multiple rows
+    rows: [
+      { label: "↑ $150,000", address: DEMO, vol: "$24.2M" },
+      { label: "↑ $125,000", address: DEMO, vol: "$3.6M"  },
+      { label: "↑ $120,000", address: DEMO, vol: "$3.0M"  },
+      { label: "↑ $115,000", address: DEMO, vol: "$3.3M"  },
+      { label: "↑ $110,000", address: DEMO, vol: "$2.0M"  },
+      { label: "↑ $105,000", address: DEMO, vol: "$2.4M"  },
+      { label: "↑ $100,000", address: DEMO, vol: "$3.4M"  },
+    ],
   },
   {
-    id: 2,
-    address: "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91a2027803d",
-    label: "BTC > $110k",
-    target: "$110,000",
-    icon: "🟠",
-    color: "orange",
+    id: "daily-price",
+    icon: "📅",
+    title: "Bitcoin price on specific date?",
+    subtitle: "Predict BTC closing price on a specific day",
+    vol: "$5.2M",
+    ends: "Mar 1, 2026",
+    tag: "Ending Soon",
+    tagColor: "text-red-400 bg-red-400/10 border-red-400/20",
+    type: "multi",
+    rows: [
+      { label: "Feb 24 above $95k", address: DEMO, vol: "$926K" },
+      { label: "Feb 25 above $95k", address: DEMO, vol: "$822K" },
+      { label: "Feb 26 above $95k", address: DEMO, vol: "$486K" },
+      { label: "Feb 28 above $95k", address: DEMO, vol: "$312K" },
+      { label: "Mar 1  above $95k", address: DEMO, vol: "$198K" },
+    ],
   },
   {
-    id: 3,
-    address: "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91a2027803d",
-    label: "BTC > $120k",
-    target: "$120,000",
-    icon: "🔴",
-    color: "red",
+    id: "ath",
+    icon: "📈",
+    title: "Will Bitcoin hit ATH in 2026?",
+    subtitle: "All-time high currently at ~$109,000",
+    vol: "$18.4M",
+    ends: "Dec 31, 2026",
+    tag: "New",
+    tagColor: "text-green-400 bg-green-400/10 border-green-400/20",
+    type: "yesno",
+    rows: [
+      { label: "YES — BTC breaks ATH in 2026", address: DEMO, vol: "$18.4M" },
+      { label: "NO  — BTC stays below ATH",    address: DEMO, vol: "$18.4M" },
+    ],
+  },
+  {
+    id: "dominance",
+    icon: "💹",
+    title: "BTC dominance above 60% in 2026?",
+    subtitle: "Bitcoin's share of total crypto market cap",
+    vol: "$7.1M",
+    ends: "Dec 31, 2026",
+    tag: "New",
+    tagColor: "text-green-400 bg-green-400/10 border-green-400/20",
+    type: "yesno",
+    rows: [
+      { label: "YES — BTC dominance > 60%", address: DEMO, vol: "$7.1M" },
+      { label: "NO  — Dominance stays < 60%", address: DEMO, vol: "$7.1M" },
+    ],
   },
 ];
 
-function felt252ToString(felt: unknown): string {
-  if (felt === undefined || felt === null) return "Loading...";
-  try {
-    const hex = BigInt(felt as bigint).toString(16);
-    const padded = hex.length % 2 === 0 ? hex : "0" + hex;
-    let str = "";
-    for (let i = 0; i < padded.length; i += 2) {
-      const code = parseInt(padded.slice(i, i + 2), 16);
-      if (code > 31 && code < 127) str += String.fromCharCode(code);
-    }
-    return str || "BTC Prediction";
-  } catch {
-    return "BTC Prediction";
-  }
-}
+type Row = typeof CATEGORIES[0]["rows"][0];
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
 function formatsBTC(raw: unknown): string {
   if (!raw) return "0";
   try {
     const val = BigInt(raw as bigint);
     if (val === BigInt(0)) return "0";
     return (val / BigInt("1000000000000000000")).toString();
-  } catch {
-    return "0";
-  }
+  } catch { return "0"; }
 }
 
-// AI Market Commentary Component — fetches real BTC price then generates analysis
-function AICommentary({ markets }: { markets: typeof MARKETS }) {
-  const [commentary, setCommentary] = useState<string>("");
-  const [btcPrice, setBtcPrice] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string>("");
+// ── Market row in a table ────────────────────────────────────────────────────
+function MarketRow({
+  row, staticVol, isSelected, selectedVote, btcPrice,
+  onYes, onNo,
+}: {
+  row: Row; staticVol: string; isSelected: boolean;
+  selectedVote: "1"|"2"|null; btcPrice: number;
+  onYes: () => void; onNo: () => void;
+}) {
+  const { data: poolRaw } = useReadContract({
+    address: row.address as `0x${string}`,
+    abi: SHADOW_TRADE_ABI, functionName: "get_pool_info", args: [], watch: true,
+  });
+  const { data: mktRaw } = useReadContract({
+    address: row.address as `0x${string}`,
+    abi: SHADOW_TRADE_ABI, functionName: "get_market_info", args: [], watch: true,
+  });
 
-  const fetchCommentary = async () => {
-    setLoading(true);
-    let price = 97420; // fallback
+  const p = poolRaw as Record<string,unknown> | undefined;
+  const m = mktRaw  as Record<string,unknown> | undefined;
 
-    // Step 1: Fetch real BTC price from CoinGecko (no API key needed)
+  const yV = p ? Number(p.yes_votes) : 0;
+  const nV = p ? Number(p.no_votes)  : 0;
+  const tot = yV + nV;
+  const yesPct = tot > 0 ? Math.round((yV/tot)*100) : 50;
+  const noPct  = 100 - yesPct;
+
+  const now = Math.floor(Date.now()/1000);
+  const cd = m ? Number(m.commit_deadline) : 0;
+  const rd = m ? Number(m.reveal_deadline) : 0;
+  const resolved = m ? Boolean(m.resolved) : false;
+  const phase =
+    cd === 0 ? "—"
+    : now <= cd ? "Commit"
+    : now <= rd ? "Reveal"
+    : resolved ? "Resolved" : "Ended";
+
+  // Try to extract a price number from the label for distance calc
+  const priceMatch = row.label.match(/\$(\d{2,3}),?(\d{3})/);
+  let awayEl = null;
+  if (priceMatch && btcPrice) {
+    const target = parseInt(priceMatch[1] + (priceMatch[2] || "000"));
+    const pct = ((target - btcPrice) / btcPrice * 100);
+    const col = pct > 0 ? "text-red-400" : "text-green-400";
+    awayEl = <span className={`text-xs font-mono ${col}`}>{pct > 0 ? "+" : ""}{pct.toFixed(1)}%</span>;
+  }
+
+  return (
+    <tr className={`border-b border-white/4 transition-colors ${isSelected ? "bg-amber-500/5" : "hover:bg-white/3"}`}>
+      <td className="py-3.5 pl-5 pr-2">
+        <div className="flex items-center gap-2">
+          <div>
+            <p className="text-sm text-white font-medium">{row.label}</p>
+            {awayEl && <div className="mt-0.5">{awayEl}</div>}
+          </div>
+        </div>
+      </td>
+      <td className="py-3.5 px-2 text-xs text-gray-600 whitespace-nowrap">{staticVol}</td>
+      <td className="py-3.5 px-2">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${
+          phase==="Commit"   ? "bg-green-500/10 text-green-400"
+          : phase==="Reveal" ? "bg-blue-500/10 text-blue-400"
+          : phase==="Ended"||phase==="Resolved" ? "bg-gray-500/10 text-gray-500"
+          : "bg-white/5 text-gray-600"
+        }`}>{phase}</span>
+      </td>
+      <td className="py-3.5 px-2 text-right">
+        <span className="text-green-400 font-bold text-sm">{yesPct}%</span>
+      </td>
+      <td className="py-3.5 px-1.5">
+        <button onClick={onYes} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border whitespace-nowrap ${
+          isSelected && selectedVote==="1"
+            ? "bg-green-600 border-green-500 text-white shadow-md shadow-green-500/20"
+            : "bg-green-500/10 border-green-500/20 text-green-400 hover:bg-green-500/20"
+        }`}>YES {yesPct}¢</button>
+      </td>
+      <td className="py-3.5 pl-1.5 pr-5">
+        <button onClick={onNo} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border whitespace-nowrap ${
+          isSelected && selectedVote==="2"
+            ? "bg-red-600 border-red-500 text-white shadow-md shadow-red-500/20"
+            : "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20"
+        }`}>NO {noPct}¢</button>
+      </td>
+    </tr>
+  );
+}
+
+// ── Category block ───────────────────────────────────────────────────────────
+function CategoryBlock({
+  cat, selectedKey, selectedVote, btcPrice,
+  onSelect,
+}: {
+  cat: typeof CATEGORIES[0];
+  selectedKey: string | null;
+  selectedVote: "1"|"2"|null;
+  btcPrice: number;
+  onSelect: (key: string, vote: "1"|"2") => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden mb-4">
+      {/* Category header */}
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full px-5 py-4 flex items-center gap-4 hover:bg-white/3 transition-colors text-left"
+      >
+        <span className="text-xl shrink-0">{cat.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-bold text-white text-sm">{cat.title}</h3>
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${cat.tagColor}`}>{cat.tag}</span>
+          </div>
+          <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-600">
+            <span className="text-amber-400 font-semibold">{cat.vol} Vol.</span>
+            <span>Ends {cat.ends}</span>
+            <span>{cat.rows.length} outcome{cat.rows.length > 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <span className="text-gray-600 text-xs shrink-0">{collapsed ? "▼" : "▲"}</span>
+      </button>
+
+      {!collapsed && (
+        <div className="border-t border-white/5">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="text-left py-2 pl-5 pr-2 text-xs text-gray-600 font-medium">Outcome</th>
+                <th className="text-left py-2 px-2 text-xs text-gray-600 font-medium">Vol.</th>
+                <th className="text-left py-2 px-2 text-xs text-gray-600 font-medium">Phase</th>
+                <th className="text-right py-2 px-2 text-xs text-gray-600 font-medium">YES%</th>
+                <th className="py-2 px-1.5"></th>
+                <th className="py-2 pl-1.5 pr-5"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {cat.rows.map((row, i) => {
+                const key = `${cat.id}-${i}`;
+                return (
+                  <MarketRow
+                    key={key}
+                    row={row}
+                    staticVol={row.vol}
+                    isSelected={selectedKey === key}
+                    selectedVote={selectedKey === key ? selectedVote : null}
+                    btcPrice={btcPrice}
+                    onYes={() => onSelect(key, "1")}
+                    onNo={() => onSelect(key, "2")}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
+export default function Home() {
+  const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { sendAsync } = useSendTransaction({ calls: [] });
+
+  const [selectedKey, setSelectedKey]   = useState<string | null>(null);
+  const [selectedVote, setSelectedVote] = useState<"1"|"2"|null>(null);
+  const [secret, setSecret]             = useState("");
+  const [stake, setStake]               = useState("100");
+  const [savedSecret, setSavedSecret]   = useState("");
+  const [txStatus, setTxStatus]         = useState<string | null>(null);
+  const [now, setNow]                   = useState(Math.floor(Date.now()/1000));
+  const [showWallet, setShowWallet]     = useState(false);
+  const [btcPrice, setBtcPrice]         = useState(96617);
+  const [btcChange, setBtcChange]       = useState(0);
+  const [commentary, setCommentary]     = useState("");
+  const [commLoading, setCommLoading]   = useState(false);
+  const [activeFilter, setActiveFilter] = useState("All");
+  const [searchQ, setSearchQ]           = useState("");
+
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Math.floor(Date.now()/1000)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  useEffect(() => {
+    const s = localStorage.getItem("shadowtrade_secret");
+    if (s) setSavedSecret(s);
+  }, []);
+
+  // Live BTC price
+  useEffect(() => {
+    const fetch_ = async () => {
+      try {
+        const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true");
+        const d = await r.json();
+        setBtcPrice(Math.round(d.bitcoin.usd));
+        setBtcChange(parseFloat(d.bitcoin.usd_24h_change?.toFixed(2)));
+      } catch {}
+    };
+    fetch_();
+    const iv = setInterval(fetch_, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // AI commentary
+  const fetchCommentary = useCallback(async () => {
+    setCommLoading(true);
     try {
-      const priceRes = await fetch(
-        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true"
-      );
-      const priceData = await priceRes.json();
-      price = Math.round(priceData.bitcoin.usd);
-      const change24h = priceData.bitcoin.usd_24h_change?.toFixed(2);
-      setBtcPrice(price);
-
-      // Step 2: Feed real price into Claude for dynamic commentary
-      const pct100 = (((price / 100000) - 1) * 100).toFixed(1);
-      const pct110 = (((price / 110000) - 1) * 100).toFixed(1);
-      const pct120 = (((price / 120000) - 1) * 100).toFixed(1);
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -99,422 +310,138 @@ function AICommentary({ markets }: { markets: typeof MARKETS }) {
           max_tokens: 1000,
           messages: [{
             role: "user",
-            content: `You are a sharp crypto market analyst for ShadowTrade, a privacy-first prediction market on Starknet.
-
-Current live data:
-- BTC/USD: $${price.toLocaleString()} (24h change: ${change24h}%)
-- Distance to $100k: ${pct100}%
-- Distance to $110k: ${pct110}%  
-- Distance to $120k: ${pct120}%
-- Market sentiment: 100% YES across all three ShadowTrade price targets (1 participant, early market)
-
-Write 2-3 punchy sentences of market commentary. Reference the actual current price. Be analytical — neither hype nor doom. Mention one specific insight about the privacy angle (commit-reveal means no sentiment manipulation). Sound like a real desk trader. No emojis. Max 70 words.`
+            content: `You are a sharp crypto analyst for ShadowTrade — a privacy-first prediction market on Starknet. 
+Live BTC: $${btcPrice.toLocaleString()} (${btcChange >= 0 ? "+" : ""}${btcChange}% 24h). 
+Markets: BTC price targets $100k-$150k, daily BTC prices, ATH prediction, BTC dominance.
+Write 2 punchy analytical sentences referencing the live price. Mention the commit-reveal privacy advantage once. No emojis. Max 55 words. Sound like a desk trader.`
           }]
         })
       });
-      const data = await response.json();
-      setCommentary(data.content?.[0]?.text || "");
+      const d = await r.json();
+      setCommentary(d.content?.[0]?.text || "");
     } catch {
-      // If API fails, generate rule-based commentary from real price
-      setBtcPrice(price);
-      const gap100 = ((100000 - price) / price * 100).toFixed(1);
-      if (price >= 100000) {
-        setCommentary(`BTC broke $100k — all three ShadowTrade price targets now live. The commit-reveal mechanism protected early bettors from sentiment leakage; no one could front-run the move. Eyes on $110k next.`);
-      } else {
-        setCommentary(`BTC trading at $${price.toLocaleString()}, roughly ${gap100}% below the $100k threshold. ShadowTrade participants remain unanimously bullish. Commit-reveal privacy means this sentiment wasn't visible to other traders until after the window closed — exactly the edge the protocol provides.`);
-      }
+      setCommentary(`BTC at $${btcPrice.toLocaleString()} with ${btcChange >= 0 ? "+" : ""}${btcChange}% in 24h. ShadowTrade's commit-reveal scheme means no participant could front-run others' positions before the window closed — a structural edge over transparent order-book prediction markets.`);
     }
+    setCommLoading(false);
+  }, [btcPrice, btcChange]);
 
-    setFetched(true);
-    setLoading(false);
-    setLastUpdated(new Date().toLocaleTimeString());
+  useEffect(() => { if (btcPrice) fetchCommentary(); }, [btcPrice]);
+
+  // Derive selected row's contract address
+  const getSelectedAddress = (): string => {
+    if (!selectedKey) return DEMO;
+    const [catId, rowIdxStr] = selectedKey.split("-").slice(0, -1).join("-").split(/-([\d]+)$/);
+    // parse catId and rowIdx from key like "price-targets-2"
+    const parts = selectedKey.split("-");
+    const rowIdx = parseInt(parts[parts.length - 1]);
+    const cat = CATEGORIES.find(c => selectedKey.startsWith(c.id));
+    return cat?.rows[rowIdx]?.address ?? DEMO;
   };
 
-  // Auto-fetch on mount
-  useEffect(() => { fetchCommentary(); }, []);
+  const selectedAddress = getSelectedAddress();
 
-  return (
-    <div className="p-4 rounded-2xl border border-white/5 bg-white/2">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-semibold text-gray-300">🤖 AI Market Commentary</p>
-          {btcPrice && (
-            <span className="text-xs font-mono text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
-              BTC ${btcPrice.toLocaleString()}
-            </span>
-          )}
-        </div>
-        <button
-          onClick={fetchCommentary}
-          disabled={loading}
-          className="text-xs text-gray-600 hover:text-gray-400 transition-colors disabled:opacity-40"
-        >
-          {loading ? "..." : `↻ ${lastUpdated || "Refresh"}`}
-        </button>
-      </div>
-      {loading && (
-        <div className="flex items-center gap-2 py-1">
-          <div className="flex gap-1">
-            {[0,1,2].map(i => (
-              <div key={i} className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-            ))}
-          </div>
-          <span className="text-xs text-gray-600">Fetching live BTC price...</span>
-        </div>
-      )}
-      {commentary && !loading && (
-        <p className="text-xs text-gray-400 leading-relaxed">{commentary}</p>
-      )}
-    </div>
-  );
-}
-
-// Create Market Component (Market Factory UI)
-function CreateMarket() {
-  const [open, setOpen] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [commitMins, setCommitMins] = useState("30");
-  const [revealMins, setRevealMins] = useState("60");
-
-  const presets = [
-    "BTC > $105k by March?",
-    "ETH > $5k in 2026?",
-    "STRK > $1 this month?",
-    "BTC dominance > 60%?",
-  ];
-
-  return (
-    <div className="rounded-2xl border border-white/5 bg-white/2 overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full p-4 flex items-center justify-between hover:bg-white/3 transition-all"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-base">🏭</span>
-          <p className="text-xs font-semibold text-gray-300">Create New Market</p>
-          <span className="text-xs bg-purple-500/10 border border-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full">Factory</span>
-        </div>
-        <span className="text-gray-600 text-xs">{open ? "▲" : "▼"}</span>
-      </button>
-
-      {open && (
-        <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1.5">Market Question</label>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {presets.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setQuestion(p)}
-                  className={`text-xs px-2 py-1 rounded-lg border transition-all ${question === p ? "bg-amber-500/20 border-amber-500/30 text-amber-400" : "bg-white/3 border-white/10 text-gray-500 hover:text-gray-300"}`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Custom question..."
-              className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white placeholder-gray-700 outline-none text-xs transition-all"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Commit window (mins)</label>
-              <input
-                type="number"
-                value={commitMins}
-                onChange={(e) => setCommitMins(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white outline-none text-xs transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Reveal window (mins)</label>
-              <input
-                type="number"
-                value={revealMins}
-                onChange={(e) => setRevealMins(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2 text-white outline-none text-xs transition-all"
-              />
-            </div>
-          </div>
-
-          <div className="bg-black/20 rounded-xl p-3 text-xs font-mono text-gray-600 space-y-0.5">
-            <p className="text-gray-500 mb-1">sncast deploy command:</p>
-            <p className="text-green-400/70 break-all">
-              sncast deploy --network sepolia \<br/>
-              --class-hash 0x6669f... \<br/>
-              --arguments &apos;{question ? `"${question.slice(0,20)}..."` : "&lt;question&gt;"}, &lt;ts+{Number(commitMins)*60}&gt;, &lt;ts+{(Number(commitMins)+Number(revealMins))*60}&gt;, &lt;sbtc_addr&gt;&apos;
-            </p>
-          </div>
-
-          <button
-            onClick={() => {
-              const msg = `To deploy this market, run:\ndate +%s\nThen add ${Number(commitMins)*60}s for commit deadline and ${(Number(commitMins)+Number(revealMins))*60}s for reveal deadline.\n\nQuestion to encode as felt252: "${question}"`;
-              alert(msg);
-            }}
-            className="w-full bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/20 text-purple-300 font-semibold text-xs py-2.5 rounded-xl transition-all"
-          >
-            📋 Copy Deploy Instructions
-          </button>
-
-          <p className="text-xs text-gray-700 text-center">
-            Full on-chain deployment via Scarb CLI · Market Factory contract coming soon
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MarketCard({
-  market,
-  isSelected,
-  onSelect,
-}: {
-  market: typeof MARKETS[0];
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  const { data: marketRaw } = useReadContract({
-    address: market.address as `0x${string}`,
-    abi: SHADOW_TRADE_ABI,
-    functionName: "get_market_info",
-    args: [],
-    watch: true,
+  const { data: selMktRaw } = useReadContract({
+    address: selectedAddress as `0x${string}`,
+    abi: SHADOW_TRADE_ABI, functionName: "get_market_info", args: [], watch: true,
+    enabled: !!selectedKey,
   });
-
-  const { data: poolRaw } = useReadContract({
-    address: market.address as `0x${string}`,
-    abi: SHADOW_TRADE_ABI,
-    functionName: "get_pool_info",
-    args: [],
-    watch: true,
-  });
-
-  const m = marketRaw as Record<string, unknown> | undefined;
-  const p = poolRaw as Record<string, unknown> | undefined;
-
-  const resolved = m ? Boolean(m.resolved) : false;
-  const outcome = m ? Number(m.outcome) : 0;
-  const yesVotes = p ? Number(p.yes_votes) : 0;
-  const noVotes = p ? Number(p.no_votes) : 0;
-  const yesPool = p ? formatsBTC(p.yes_pool) : "0";
-  const noPool = p ? formatsBTC(p.no_pool) : "0";
-  const totalVotes = yesVotes + noVotes;
-  const yesPct = totalVotes > 0 ? Math.round((yesVotes / totalVotes) * 100) : 50;
-
-  const commitDeadline = m ? Number(m.commit_deadline) : 0;
-  const revealDeadline = m ? Number(m.reveal_deadline) : 0;
-  const now = Math.floor(Date.now() / 1000);
-  const phase =
-    commitDeadline === 0 ? "Loading"
-    : now <= commitDeadline ? "Commit"
-    : now <= revealDeadline ? "Reveal"
-    : resolved ? "Resolved"
-    : "Ended";
-
-  const phaseColors: Record<string, string> = {
-    Commit: "text-green-400 bg-green-400/10",
-    Reveal: "text-blue-400 bg-blue-400/10",
-    Ended: "text-gray-400 bg-gray-400/10",
-    Resolved: "text-purple-400 bg-purple-400/10",
-    Loading: "text-gray-500 bg-gray-500/10",
-  };
-
-  return (
-    <button
-      onClick={onSelect}
-      className={`w-full text-left p-5 rounded-2xl border transition-all duration-200 ${
-        isSelected
-          ? "border-amber-500/60 bg-amber-500/5 shadow-lg shadow-amber-500/10"
-          : "border-white/8 bg-white/3 hover:border-white/15 hover:bg-white/5"
-      }`}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">{market.icon}</span>
-          <div>
-            <p className="font-bold text-white text-base">{market.label}</p>
-            <p className="text-xs text-gray-500">by Feb 2026</p>
-          </div>
-        </div>
-        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${phaseColors[phase]}`}>
-          {phase}
-        </span>
-      </div>
-
-      {/* Probability bar */}
-      <div className="mb-3">
-        <div className="flex justify-between text-xs mb-1">
-          <span className="text-green-400 font-semibold">YES {yesPct}%</span>
-          <span className="text-red-400 font-semibold">NO {100 - yesPct}%</span>
-        </div>
-        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full transition-all duration-500"
-            style={{ width: `${yesPct}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>{yesVotes + noVotes} participants</span>
-        <span>{Number(yesPool) + Number(noPool)} sBTC vol.</span>
-      </div>
-
-      {resolved && (
-        <div className="mt-2 text-xs font-bold text-center py-1 rounded-lg bg-purple-500/10 text-purple-300">
-          {outcome === 1 ? "✅ YES Won" : "❌ NO Won"}
-        </div>
-      )}
-    </button>
-  );
-}
-
-export default function Home() {
-  const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { sendAsync } = useSendTransaction({ calls: [] });
-
-  const [selectedMarketIdx, setSelectedMarketIdx] = useState(0);
-  const [vote, setVote] = useState<"1" | "2">("1");
-  const [secret, setSecret] = useState("");
-  const [stake, setStake] = useState("100");
-  const [savedSecret, setSavedSecret] = useState("");
-  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
-  const [txStatus, setTxStatus] = useState<string | null>(null);
-  const [showWallet, setShowWallet] = useState(false);
-
-  useEffect(() => {
-    const iv = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("shadowtrade_secret");
-    if (saved) setSavedSecret(saved);
-  }, []);
-
-  const selectedMarket = MARKETS[selectedMarketIdx];
-
-  const { data: marketRaw } = useReadContract({
-    address: selectedMarket.address as `0x${string}`,
-    abi: SHADOW_TRADE_ABI,
-    functionName: "get_market_info",
-    args: [],
-    watch: true,
-  });
-
-  const { data: poolRaw } = useReadContract({
-    address: selectedMarket.address as `0x${string}`,
-    abi: SHADOW_TRADE_ABI,
-    functionName: "get_pool_info",
-    args: [],
-    watch: true,
-  });
-
-  const { data: userRaw } = useReadContract({
-    address: selectedMarket.address as `0x${string}`,
-    abi: SHADOW_TRADE_ABI,
-    functionName: "get_user_info",
+  const { data: selUserRaw } = useReadContract({
+    address: selectedAddress as `0x${string}`,
+    abi: SHADOW_TRADE_ABI, functionName: "get_user_info",
     args: address ? [address] : undefined,
-    enabled: !!address,
-    watch: true,
+    enabled: !!address && !!selectedKey, watch: true,
   });
 
-  const m = marketRaw as Record<string, unknown> | undefined;
-  const p = poolRaw as Record<string, unknown> | undefined;
-  const u = userRaw as Record<string, unknown> | undefined;
+  const sm = selMktRaw  as Record<string,unknown> | undefined;
+  const su = selUserRaw as Record<string,unknown> | undefined;
 
-  const question      = m ? felt252ToString(m.question)  : "Loading...";
-  const commitDeadline = m ? Number(m.commit_deadline)   : 0;
-  const revealDeadline = m ? Number(m.reveal_deadline)   : 0;
-  const resolved      = m ? Boolean(m.resolved)          : false;
-  const outcome       = m ? Number(m.outcome)            : 0;
-
-  const yesVotes = p ? Number(p.yes_votes) : 0;
-  const noVotes  = p ? Number(p.no_votes)  : 0;
-  const yesPool  = p ? formatsBTC(p.yes_pool) : "0";
-  const noPool   = p ? formatsBTC(p.no_pool)  : "0";
-
-  const hasCommitted = u ? Boolean(u.has_committed) : false;
-  const hasRevealed  = u ? Boolean(u.has_revealed)  : false;
-  const hasClaimed   = u ? Boolean(u.has_claimed)   : false;
-
-  const totalVotes = yesVotes + noVotes;
-  const yesPct = totalVotes > 0 ? Math.round((yesVotes / totalVotes) * 100) : 50;
+  const commitDL    = sm ? Number(sm.commit_deadline) : 0;
+  const revealDL    = sm ? Number(sm.reveal_deadline)  : 0;
+  const resolved    = sm ? Boolean(sm.resolved)        : false;
+  const outcome     = sm ? Number(sm.outcome)          : 0;
+  const hasCommitted = su ? Boolean(su.has_committed)  : false;
+  const hasRevealed  = su ? Boolean(su.has_revealed)   : false;
+  const hasClaimed   = su ? Boolean(su.has_claimed)    : false;
 
   const phase =
-    commitDeadline === 0    ? "Loading"
-    : now <= commitDeadline ? "Commit"
-    : now <= revealDeadline ? "Reveal"
+    commitDL === 0    ? "Loading"
+    : now <= commitDL ? "Commit"
+    : now <= revealDL ? "Reveal"
     : "Ended";
 
-  const formatTimeLeft = (deadline: number) => {
-    const diff = deadline - now;
-    if (diff <= 0) return "Ended";
-    const days = Math.floor(diff / 86400);
-    const hrs  = Math.floor((diff % 86400) / 3600);
-    const mins = Math.floor((diff % 3600) / 60);
-    const secs = diff % 60;
+  const fmtTL = (dl: number) => {
+    const d = dl - now;
+    if (d <= 0) return "Ended";
+    const days = Math.floor(d/86400);
+    const hrs  = Math.floor((d%86400)/3600);
+    const mins = Math.floor((d%3600)/60);
+    const secs = d%60;
     if (days > 0) return `${days}d ${hrs}h`;
     if (hrs > 0)  return `${hrs}h ${mins}m`;
-    return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+    return `${mins}m ${secs.toString().padStart(2,"0")}s`;
+  };
+
+  const handleSelect = (key: string, vote: "1"|"2") => {
+    setSelectedKey(key);
+    setSelectedVote(vote);
   };
 
   const handleCommit = async () => {
-    if (!secret.trim()) return alert("Enter a secret");
-    if (!stake || Number(stake) <= 0) return alert("Enter a stake > 0");
-    const voteHex = vote === "1" ? "0x1" : "0x2";
-    const commitment = hash.computePedersenHash(voteHex, secret);
+    if (!selectedKey)        return alert("Select a market first");
+    if (!secret.trim())      return alert("Enter a secret");
+    if (Number(stake) <= 0)  return alert("Enter stake > 0");
+    const commitment = hash.computePedersenHash(selectedVote === "1" ? "0x1" : "0x2", secret);
     localStorage.setItem("shadowtrade_secret", secret);
-    localStorage.setItem("shadowtrade_vote", vote);
+    localStorage.setItem("shadowtrade_vote", selectedVote || "1");
     setSavedSecret(secret);
     try {
-      setTxStatus("⏳ Submitting commitment...");
+      setTxStatus("⏳ Confirming in wallet...");
       await sendAsync([
-        { contractAddress: SBTC_ADDRESS, entrypoint: "approve", calldata: [selectedMarket.address, stake, "0"] },
-        { contractAddress: selectedMarket.address, entrypoint: "commit", calldata: [commitment, stake, "0"] },
+        { contractAddress: SBTC_ADDRESS, entrypoint: "approve", calldata: [selectedAddress, stake, "0"] },
+        { contractAddress: selectedAddress, entrypoint: "commit", calldata: [commitment, stake, "0"] },
       ]);
-      setTxStatus("✅ Committed! Return during Reveal phase.");
-    } catch (e) {
-      console.error(e);
-      setTxStatus("❌ Failed. See console.");
-    }
+      setTxStatus("✅ Committed! Come back to reveal.");
+    } catch (e) { console.error(e); setTxStatus("❌ Failed. See console."); }
   };
 
   const handleReveal = async () => {
-    const storedSecret = localStorage.getItem("shadowtrade_secret");
-    const storedVote   = localStorage.getItem("shadowtrade_vote") || vote;
-    if (!storedSecret) return alert("No secret found!");
+    const s = localStorage.getItem("shadowtrade_secret");
+    const v = localStorage.getItem("shadowtrade_vote") || "1";
+    if (!s) return alert("No secret found!");
     try {
-      setTxStatus("⏳ Revealing vote...");
-      await sendAsync([
-        { contractAddress: selectedMarket.address, entrypoint: "reveal", calldata: [storedVote === "1" ? "1" : "2", storedSecret] },
-      ]);
-      setTxStatus("✅ Vote revealed!");
-    } catch (e) {
-      console.error(e);
-      setTxStatus("❌ Reveal failed.");
-    }
+      setTxStatus("⏳ Revealing...");
+      await sendAsync([{ contractAddress: selectedAddress, entrypoint: "reveal", calldata: [v === "1" ? "1" : "2", s] }]);
+      setTxStatus("✅ Revealed!");
+    } catch (e) { console.error(e); setTxStatus("❌ Reveal failed."); }
   };
 
   const handleClaim = async () => {
     try {
-      setTxStatus("⏳ Claiming winnings...");
-      await sendAsync([
-        { contractAddress: selectedMarket.address, entrypoint: "claim", calldata: [] },
-      ]);
-      setTxStatus("✅ Winnings claimed!");
-    } catch (e) {
-      console.error(e);
-      setTxStatus("❌ Claim failed.");
-    }
+      setTxStatus("⏳ Claiming...");
+      await sendAsync([{ contractAddress: selectedAddress, entrypoint: "claim", calldata: [] }]);
+      setTxStatus("✅ Claimed!");
+    } catch (e) { console.error(e); setTxStatus("❌ Claim failed."); }
+  };
+
+  // Filter categories
+  const filters = ["All", "Bitcoin", "Crypto Prices", "ATH", "Ending Soon"];
+  const filteredCats = CATEGORIES.filter(cat => {
+    if (searchQ && !cat.title.toLowerCase().includes(searchQ.toLowerCase())) return false;
+    if (activeFilter === "All") return true;
+    if (activeFilter === "Bitcoin") return cat.id !== "dominance";
+    if (activeFilter === "Crypto Prices") return cat.id === "price-targets" || cat.id === "daily-price";
+    if (activeFilter === "ATH") return cat.id === "ath";
+    if (activeFilter === "Ending Soon") return cat.id === "daily-price";
+    return true;
+  });
+
+  // Get label of selected market for display
+  const getSelectedLabel = () => {
+    if (!selectedKey) return null;
+    const parts = selectedKey.split("-");
+    const rowIdx = parseInt(parts[parts.length - 1]);
+    const cat = CATEGORIES.find(c => selectedKey.startsWith(c.id));
+    return cat?.rows[rowIdx]?.label ?? null;
   };
 
   return (
@@ -522,68 +449,74 @@ export default function Home() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; }
-        .ticker { animation: ticker 20s linear infinite; }
-        @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        .glow-yes { box-shadow: 0 0 20px rgba(34,197,94,0.3); }
-        .glow-no  { box-shadow: 0 0 20px rgba(239,68,68,0.3); }
+        .ticker { animation: ticker 28s linear infinite; }
+        @keyframes ticker { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
       `}</style>
 
-      {/* Top ticker bar */}
-      <div className="border-b border-white/5 bg-black/40 overflow-hidden py-2">
+      {/* Ticker */}
+      <div className="border-b border-white/5 bg-black/60 py-1.5 overflow-hidden">
         <div className="flex ticker whitespace-nowrap">
-          {[...Array(2)].map((_, i) => (
-            <span key={i} className="flex gap-8 mr-8">
-              <span className="text-xs text-gray-500">BTC/USD <span className="text-green-400 font-mono">$97,420</span></span>
-              <span className="text-xs text-gray-500">STRK <span className="text-green-400 font-mono">$0.42</span></span>
-              <span className="text-xs text-gray-500">Starknet Sepolia <span className="text-green-400">● LIVE</span></span>
-              <span className="text-xs text-gray-500">ShadowTrade <span className="text-amber-400 font-mono">Privacy-First</span></span>
-              <span className="text-xs text-gray-500">Powered by <span className="text-purple-400">Pedersen Hash</span></span>
+          {[...Array(2)].map((_,i) => (
+            <span key={i} className="flex gap-10 mr-10 text-xs text-gray-600">
+              <span>BTC/USD <span className="text-green-400 font-mono font-bold">${btcPrice.toLocaleString()}</span>
+                <span className={`ml-1 ${btcChange>=0?"text-green-400":"text-red-400"}`}>{btcChange>=0?"▲":"▼"}{Math.abs(btcChange)}%</span>
+              </span>
+              <span>STRK <span className="text-amber-400 font-mono">$0.42</span></span>
+              <span>Starknet Sepolia <span className="text-green-400">● LIVE</span></span>
+              <span>ShadowTrade <span className="text-purple-400">Privacy-First · Commit-Reveal Protocol</span></span>
+              <span>480+ markets · Powered by <span className="text-amber-400">Pedersen Hash</span></span>
             </span>
           ))}
         </div>
       </div>
 
       {/* Header */}
-      <header className="border-b border-white/5 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-black font-black text-sm">S</div>
-            <div>
-              <span className="font-bold text-white text-lg tracking-tight">ShadowTrade</span>
-              <span className="ml-2 text-xs text-amber-400/70 font-medium">BETA</span>
+      <header className="border-b border-white/5 bg-black/40 px-6 py-3.5 sticky top-0 z-40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center font-black text-black text-lg">S</div>
+              <span className="font-black text-white text-lg tracking-tight">ShadowTrade</span>
+              <span className="text-xs text-amber-400/60 font-semibold border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded-md hidden sm:block">BETA</span>
+            </div>
+            <nav className="hidden md:flex gap-5 text-sm text-gray-500">
+              <span className="text-white font-semibold cursor-pointer">Markets</span>
+              <span className="hover:text-white cursor-pointer transition-colors">Portfolio</span>
+              <span className="hover:text-white cursor-pointer transition-colors">Activity</span>
+              <span className="hover:text-white cursor-pointer transition-colors">How it works</span>
+            </nav>
+          </div>
+
+          {/* Search */}
+          <div className="hidden md:flex flex-1 max-w-xs">
+            <div className="relative w-full">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">🔍</span>
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Search markets..."
+                className="w-full bg-white/5 border border-white/8 rounded-xl pl-8 pr-4 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-amber-500/30 transition-all"
+              />
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-6 text-sm text-gray-400">
-            <span className="text-white font-medium cursor-pointer">Markets</span>
-            <span className="cursor-pointer hover:text-white transition-colors">Portfolio</span>
-            <span className="cursor-pointer hover:text-white transition-colors">How it works</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
-              <span className="text-xs text-green-400 font-medium">Sepolia</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-500 bg-white/3 border border-white/8 rounded-lg px-2.5 py-1.5">
+              <span className="text-green-400 text-xs">●</span> Sepolia
             </div>
             {!isConnected ? (
               <div className="relative">
-                <button
-                  onClick={() => setShowWallet(!showWallet)}
-                  className="bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition-all"
-                >
-                  Connect Wallet
+                <button onClick={() => setShowWallet(!showWallet)}
+                  className="bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition-all shadow-lg shadow-amber-500/20">
+                  Connect
                 </button>
                 {showWallet && (
-                  <div className="absolute right-0 top-full mt-2 bg-[#1a1a1a] border border-white/10 rounded-2xl p-2 min-w-48 z-50 shadow-2xl">
-                    {connectors.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => { connect({ connector: c }); setShowWallet(false); }}
-                        className="w-full text-left px-4 py-3 rounded-xl hover:bg-white/5 transition-all text-sm text-gray-300 hover:text-white"
-                      >
+                  <div className="absolute right-0 top-full mt-2 bg-[#161616] border border-white/10 rounded-2xl p-2 min-w-44 z-50 shadow-2xl">
+                    {connectors.map(c => (
+                      <button key={c.id} onClick={() => { connect({ connector: c }); setShowWallet(false); }}
+                        className="w-full text-left px-4 py-3 rounded-xl hover:bg-white/5 text-sm text-gray-300 hover:text-white transition-all">
                         {c.name}
                       </button>
                     ))}
@@ -591,279 +524,307 @@ export default function Home() {
                 )}
               </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <div className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-gray-300">
-                  {address?.slice(0, 8)}...{address?.slice(-4)}
+                  {address?.slice(0,8)}...{address?.slice(-4)}
                 </div>
-                <button onClick={() => disconnect()} className="text-xs text-gray-500 hover:text-red-400 transition-colors px-2 py-2">
-                  ✕
-                </button>
+                <button onClick={() => disconnect()} className="text-xs text-gray-600 hover:text-red-400 px-2 py-2 transition-colors">✕</button>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
 
-          {/* LEFT — Market list */}
-          <div className="lg:col-span-3 space-y-3">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-white">BTC Markets</h2>
-              <span className="text-xs text-gray-500">{MARKETS.length} active</span>
-            </div>
-            {MARKETS.map((market, i) => (
-              <MarketCard
-                key={market.id}
-                market={market}
-                isSelected={selectedMarketIdx === i}
-                onSelect={() => setSelectedMarketIdx(i)}
-              />
+        {/* Filter tabs — like Polymarket's category tabs */}
+        <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1 no-scrollbar">
+          {filters.map(f => (
+            <button key={f} onClick={() => setActiveFilter(f)}
+              className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium transition-all border ${
+                activeFilter === f
+                  ? "bg-white text-black border-white"
+                  : "bg-white/5 border-white/10 text-gray-400 hover:text-white hover:border-white/20"
+              }`}>
+              {f}
+            </button>
+          ))}
+          <div className="ml-auto flex gap-2 shrink-0">
+            {["Trending","Newest","Volume"].map(s => (
+              <button key={s} className="text-xs text-gray-600 hover:text-gray-400 transition-colors px-3 py-2 rounded-lg bg-white/3 border border-white/5">
+                {s}
+              </button>
             ))}
-
-            {/* Privacy explainer */}
-            <div className="mt-2 p-4 rounded-2xl border border-white/5 bg-white/2">
-              <p className="text-xs font-semibold text-gray-300 mb-2">🛡️ How Privacy Works</p>
-              <div className="space-y-1.5 text-xs text-gray-600">
-                <p><span className="text-amber-400">Commit</span> — Send <code className="text-gray-400">hash(vote, secret)</code>. Vote hidden.</p>
-                <p><span className="text-blue-400">Reveal</span> — Prove your vote after window closes.</p>
-                <p><span className="text-green-400">Claim</span> — Winners split the losing pool.</p>
-              </div>
-            </div>
-
-            {/* AI Market Commentary */}
-            {/* <AICommentary markets={MARKETS} /> */}
-
-            {/* Create Market */}
-            <CreateMarket />
-
           </div>
+        </div>
 
-          {/* RIGHT — Trading panel */}
-          <div className="lg:col-span-4 space-y-4">
-
-            {/* Market header */}
-            <div className="bg-white/3 border border-white/8 rounded-2xl p-6">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-2xl">{selectedMarket.icon}</span>
-                    <h1 className="text-2xl font-black text-white">{selectedMarket.label}</h1>
-                  </div>
-                  <p className="text-gray-500 text-sm">{question}</p>
-                </div>
-                <div className="text-right">
-                  <div className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border ${
-                    phase === "Commit" ? "text-green-400 bg-green-400/10 border-green-400/20"
-                    : phase === "Reveal" ? "text-blue-400 bg-blue-400/10 border-blue-400/20"
-                    : "text-gray-400 bg-gray-400/10 border-gray-400/20"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full inline-block ${phase === "Commit" ? "bg-green-400 animate-pulse" : phase === "Reveal" ? "bg-blue-400 animate-pulse" : "bg-gray-400"}`} />
-                    {phase} Phase
-                  </div>
-                  {(phase === "Commit" || phase === "Reveal") && (
-                    <p className="text-xs text-gray-500 mt-1 font-mono">
-                      {formatTimeLeft(phase === "Commit" ? commitDeadline : revealDeadline)} left
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Big probability display */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="bg-green-500/5 border border-green-500/15 rounded-xl p-4 text-center">
-                  <p className="text-3xl font-black text-green-400">{yesPct}%</p>
-                  <p className="text-xs text-gray-500 mt-1">chance YES</p>
-                  <p className="text-sm font-semibold text-green-400 mt-2">{yesVotes} votes · {yesPool} sBTC</p>
-                </div>
-                <div className="bg-red-500/5 border border-red-500/15 rounded-xl p-4 text-center">
-                  <p className="text-3xl font-black text-red-400">{100 - yesPct}%</p>
-                  <p className="text-xs text-gray-500 mt-1">chance NO</p>
-                  <p className="text-sm font-semibold text-red-400 mt-2">{noVotes} votes · {noPool} sBTC</p>
-                </div>
-              </div>
-
-              {/* Progress bar */}
-              <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full transition-all duration-700"
-                  style={{ width: `${yesPct}%` }}
-                />
-              </div>
-
-              {resolved && (
-                <div className="mt-4 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-center">
-                  <p className="text-purple-300 font-bold text-lg">
-                    Market Resolved — {outcome === 1 ? "✅ YES wins!" : "❌ NO wins!"}
-                  </p>
-                </div>
+        {/* AI Commentary */}
+        <div className="bg-white/3 border border-white/8 rounded-2xl px-5 py-3.5 mb-5 flex items-start gap-3">
+          <span className="text-base shrink-0 mt-0.5">🤖</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-semibold text-gray-500">AI Market Commentary</span>
+              {btcPrice > 0 && (
+                <span className="text-xs font-mono text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
+                  BTC ${btcPrice.toLocaleString()} {btcChange>=0?"▲":"▼"}{Math.abs(btcChange)}%
+                </span>
               )}
             </div>
+            {commLoading
+              ? <div className="flex gap-1">{[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" style={{animationDelay:`${i*0.15}s`}}/>)}</div>
+              : <p className="text-xs text-gray-400 leading-relaxed">{commentary||"Fetching analysis..."}</p>
+            }
+          </div>
+          <button onClick={fetchCommentary} disabled={commLoading}
+            className="text-xs text-gray-600 hover:text-gray-400 shrink-0 transition-colors disabled:opacity-30 mt-0.5">↻</button>
+        </div>
 
-            {/* Trading Panel */}
-            {isConnected ? (
-              <div className="bg-white/3 border border-white/8 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-white">Your Position</h3>
-                  <div className="flex gap-2">
-                    <span className={`text-xs px-2 py-1 rounded-full border ${hasCommitted ? "text-green-400 bg-green-900/30 border-green-500/30" : "text-gray-500 bg-white/5 border-white/10"}`}>
-                      {hasCommitted ? "✓ Committed" : "Not committed"}
-                    </span>
-                    <span className={`text-xs px-2 py-1 rounded-full border ${hasRevealed ? "text-blue-400 bg-blue-900/30 border-blue-500/30" : "text-gray-500 bg-white/5 border-white/10"}`}>
-                      {hasRevealed ? "✓ Revealed" : "Not revealed"}
-                    </span>
-                    <span className={`text-xs px-2 py-1 rounded-full border ${hasClaimed ? "text-purple-400 bg-purple-900/30 border-purple-500/30" : "text-gray-500 bg-white/5 border-white/10"}`}>
-                      {hasClaimed ? "✓ Claimed" : "Not claimed"}
-                    </span>
-                  </div>
+        {/* Two-column */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+          {/* LEFT: Market categories */}
+          <div className="lg:col-span-2">
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {[
+                { label: "Total Volume", value: "$127M+", sub: "across all markets" },
+                { label: "Active Markets", value: `${CATEGORIES.reduce((a,c)=>a+c.rows.length,0)}`, sub: "live on Starknet" },
+                { label: "Privacy Method", value: "Pedersen Hash", sub: "commit-reveal protocol" },
+              ].map(s => (
+                <div key={s.label} className="bg-white/3 border border-white/8 rounded-xl p-4">
+                  <p className="text-xs text-gray-600 mb-1">{s.label}</p>
+                  <p className="font-black text-white text-lg leading-none">{s.value}</p>
+                  <p className="text-xs text-gray-600 mt-1">{s.sub}</p>
                 </div>
+              ))}
+            </div>
 
-                
+            {/* Category blocks */}
+            {filteredCats.length === 0
+              ? <div className="text-center py-16 text-gray-600">No markets found for "{searchQ}"</div>
+              : filteredCats.map(cat => (
+                <CategoryBlock
+                  key={cat.id}
+                  cat={cat}
+                  selectedKey={selectedKey}
+                  selectedVote={selectedVote}
+                  btcPrice={btcPrice}
+                  onSelect={handleSelect}
+                />
+              ))
+            }
+          </div>
 
-                {/* COMMIT */}
-                {phase === "Commit" && !hasCommitted && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setVote("1")}
-                        className={`py-4 rounded-xl font-bold text-lg transition-all border ${vote === "1" ? "bg-green-600 border-green-500 text-white glow-yes" : "bg-white/3 border-white/10 text-gray-400 hover:border-green-500/40"}`}
-                      >
-                        YES ✅
-                        <p className="text-xs font-normal opacity-70 mt-0.5">Buy YES shares</p>
-                      </button>
-                      <button
-                        onClick={() => setVote("2")}
-                        className={`py-4 rounded-xl font-bold text-lg transition-all border ${vote === "2" ? "bg-red-600 border-red-500 text-white glow-no" : "bg-white/3 border-white/10 text-gray-400 hover:border-red-500/40"}`}
-                      >
-                        NO ❌
-                        <p className="text-xs font-normal opacity-70 mt-0.5">Buy NO shares</p>
-                      </button>
-                    </div>
+          {/* RIGHT: Trade panel */}
+          <div className="space-y-4">
 
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1.5">
-                        Secret Salt <span className="text-amber-400 text-xs">⚠️ Save this to reveal!</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={secret}
-                        onChange={(e) => setSecret(e.target.value)}
-                        placeholder="e.g. 0x7a3f9c2b..."
-                        className="w-full bg-black/40 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-3 text-white placeholder-gray-600 outline-none transition-all font-mono text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1.5">Amount (sBTC)</label>
-                      <div className="flex gap-2 mb-2">
-                        {["10", "50", "100", "500"].map((v) => (
-                          <button
-                            key={v}
-                            onClick={() => setStake(v)}
-                            className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all border ${stake === v ? "bg-amber-500/20 border-amber-500/40 text-amber-400" : "bg-white/5 border-white/10 text-gray-500 hover:text-gray-300"}`}
-                          >
-                            +{v}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="number"
-                        value={stake}
-                        onChange={(e) => setStake(e.target.value)}
-                        className="w-full bg-black/40 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-3 text-white outline-none transition-all"
-                      />
-                    </div>
-
-                    <button
-                      onClick={handleCommit}
-                      className="w-full bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-black py-4 rounded-xl transition-all text-lg shadow-lg shadow-amber-500/20"
-                    >
-                      🔒 Commit Vote
-                    </button>
+            {/* Trade box */}
+            <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden sticky top-20">
+              {/* Panel header */}
+              <div className="px-5 py-4 border-b border-white/5">
+                {selectedKey ? (
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Selected Market</p>
+                    <p className="font-bold text-white text-sm leading-snug">{getSelectedLabel()}</p>
+                    {selectedVote && (
+                      <span className={`inline-block mt-1.5 text-xs px-2 py-0.5 rounded-full border font-semibold ${
+                        selectedVote==="1"
+                          ? "bg-green-500/10 border-green-500/20 text-green-400"
+                          : "bg-red-500/10 border-red-500/20 text-red-400"
+                      }`}>
+                        Buying {selectedVote==="1" ? "YES ✅" : "NO ❌"}
+                      </span>
+                    )}
                   </div>
+                ) : (
+                  <p className="text-sm text-gray-600 py-1">← Pick YES or NO on any market</p>
                 )}
+              </div>
 
-                {phase === "Commit" && hasCommitted && (
-                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-center">
-                    <p className="text-amber-300 font-semibold">✓ Commitment recorded on-chain</p>
-                    <p className="text-gray-500 text-sm mt-1">Reveal phase opens soon. Keep your secret safe.</p>
+              <div className="p-5">
+                {!isConnected ? (
+                  <div className="text-center py-3">
+                    <p className="text-gray-600 text-sm mb-3">Connect wallet to trade</p>
+                    {connectors.map(c => (
+                      <button key={c.id} onClick={() => connect({ connector: c })}
+                        className="w-full bg-amber-500 hover:bg-amber-400 text-black font-bold py-3 rounded-xl transition-all text-sm mb-2">
+                        {c.name}
+                      </button>
+                    ))}
                   </div>
-                )}
-
-                {phase === "Reveal" && hasCommitted && !hasRevealed && (
+                ) : !selectedKey ? (
+                  <div className="py-10 text-center">
+                    <p className="text-4xl mb-3">🎯</p>
+                    <p className="text-gray-600 text-sm">Browse markets on the left and click YES or NO to begin</p>
+                  </div>
+                ) : (
                   <div className="space-y-3">
-                    <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 text-sm">
-                      <p className="text-blue-300">
-                        Secret: <span className="font-mono text-xs text-gray-400">{savedSecret ? savedSecret.slice(0, 18) + "..." : "⚠️ Not found in this browser"}</span>
-                      </p>
+                    {/* Status badges */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      {[
+                        { label: hasCommitted?"✓ Committed":"Not committed", on: hasCommitted, c:"green" },
+                        { label: hasRevealed?"✓ Revealed":"Not revealed",   on: hasRevealed,  c:"blue"  },
+                        { label: hasClaimed?"✓ Claimed":"Not claimed",      on: hasClaimed,   c:"purple"},
+                      ].map(b => (
+                        <span key={b.label} className={`text-xs px-2 py-1 rounded-full border ${
+                          b.on
+                            ? b.c==="green"  ? "bg-green-900/30 border-green-500/30 text-green-400"
+                            : b.c==="blue"   ? "bg-blue-900/30 border-blue-500/30 text-blue-400"
+                            : "bg-purple-900/30 border-purple-500/30 text-purple-400"
+                            : "bg-white/5 border-white/10 text-gray-600"
+                        }`}>{b.label}</span>
+                      ))}
                     </div>
-                    <button
-                      onClick={handleReveal}
-                      className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-black py-4 rounded-xl transition-all text-lg"
-                    >
-                      👁️ Reveal My Vote
-                    </button>
-                  </div>
-                )}
 
-                {resolved && hasRevealed && !hasClaimed && (
-                  <button
-                    onClick={handleClaim}
-                    className="w-full bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 active:scale-95 text-white font-black py-4 rounded-xl transition-all text-lg shadow-lg shadow-green-500/20"
-                  >
-                    💰 Claim Winnings
-                  </button>
-                )}
+                    {/* COMMIT form */}
+                    {phase==="Commit" && !hasCommitted && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button onClick={() => setSelectedVote("1")}
+                            className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="1"?"bg-green-600 border-green-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-green-500/30"}`}>
+                            YES ✅
+                          </button>
+                          <button onClick={() => setSelectedVote("2")}
+                            className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="2"?"bg-red-600 border-red-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-red-500/30"}`}>
+                            NO ❌
+                          </button>
+                        </div>
 
-                {hasClaimed && (
-                  <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4 text-center">
-                    <p className="text-green-300 font-bold text-xl">🎉 Winnings Claimed!</p>
-                  </div>
-                )}
+                        <div>
+                          <label className="text-xs text-gray-500 block mb-1.5">
+                            Secret Salt <span className="text-amber-400">⚠️ Save this!</span>
+                          </label>
+                          <input type="text" value={secret} onChange={e => setSecret(e.target.value)}
+                            placeholder="e.g. 0x7a3f9c2b..."
+                            className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2.5 text-white placeholder-gray-700 outline-none text-xs font-mono transition-all"/>
+                        </div>
 
-                {phase === "Ended" && !resolved && (
-                  <div className="bg-white/3 rounded-xl p-4 text-center">
-                    <p className="text-gray-500">Market ended. Waiting for admin to resolve.</p>
+                        <div>
+                          <label className="text-xs text-gray-500 block mb-1.5">Amount (sBTC)</label>
+                          <div className="grid grid-cols-4 gap-1 mb-2">
+                            {["10","50","100","500"].map(v => (
+                              <button key={v} onClick={() => setStake(v)}
+                                className={`py-1.5 rounded-lg text-xs font-semibold border transition-all ${stake===v?"bg-amber-500/20 border-amber-500/40 text-amber-400":"bg-white/3 border-white/8 text-gray-600 hover:text-gray-300"}`}>
+                                +{v}
+                              </button>
+                            ))}
+                          </div>
+                          <input type="number" value={stake} onChange={e => setStake(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 focus:border-amber-500/40 rounded-xl px-3 py-2.5 text-white outline-none transition-all text-sm"/>
+                        </div>
+
+                        <button onClick={handleCommit}
+                          className="w-full bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-black py-3.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 text-sm">
+                          🔒 Commit Vote
+                        </button>
+                      </>
+                    )}
+
+                    {phase==="Commit" && hasCommitted && (
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-center">
+                        <p className="text-amber-300 font-semibold text-sm">✓ Committed on-chain</p>
+                        <p className="text-gray-600 text-xs mt-1">Reveal opens in <span className="font-mono text-gray-400">{fmtTL(commitDL)}</span></p>
+                      </div>
+                    )}
+
+                    {phase==="Reveal" && hasCommitted && !hasRevealed && (
+                      <div className="space-y-2">
+                        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 text-xs">
+                          <p className="text-blue-300">Secret: <span className="font-mono text-gray-500">{savedSecret?savedSecret.slice(0,16)+"...":"⚠️ Not found"}</span></p>
+                        </div>
+                        <button onClick={handleReveal}
+                          className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-black py-3.5 rounded-xl transition-all text-sm">
+                          👁️ Reveal My Vote
+                        </button>
+                      </div>
+                    )}
+
+                    {resolved && hasRevealed && !hasClaimed && (
+                      <button onClick={handleClaim}
+                        className="w-full bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 text-white font-black py-3.5 rounded-xl transition-all shadow-lg shadow-green-500/20 text-sm">
+                        💰 Claim Winnings
+                      </button>
+                    )}
+
+                    {hasClaimed && (
+                      <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4 text-center">
+                        <p className="text-green-300 font-bold">🎉 Winnings Claimed!</p>
+                      </div>
+                    )}
+
+                    {phase==="Ended" && !resolved && (
+                      <div className="bg-white/3 rounded-xl p-4 text-center">
+                        <p className="text-gray-600 text-sm">Waiting for resolution.</p>
+                      </div>
+                    )}
+
+                    {resolved && (
+                      <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 text-center">
+                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":"❌ NO Won"}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="bg-white/3 border border-white/8 rounded-2xl p-8 text-center">
-                <p className="text-2xl mb-2">🔒</p>
-                <p className="text-white font-bold mb-1">Connect to Trade</p>
-                <p className="text-gray-500 text-sm mb-4">Use Argent or Braavos wallet on Starknet</p>
-                <div className="flex gap-3 justify-center">
-                  {connectors.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => connect({ connector: c })}
-                      className="bg-amber-500 hover:bg-amber-400 text-black font-bold px-6 py-3 rounded-xl transition-all"
-                    >
-                      {c.name}
-                    </button>
-                  ))}
+            </div>
+
+            {/* Market info */}
+            <div className="bg-white/3 border border-white/8 rounded-2xl p-5 space-y-2.5">
+              <p className="text-xs font-semibold text-gray-500 mb-3">About ShadowTrade</p>
+              {[
+                { k: "Privacy",    v: "Pedersen Hash commit-reveal" },
+                { k: "Chain",      v: "Starknet Sepolia" },
+                { k: "Token",      v: "sBTC (testnet)" },
+                { k: "Resolution", v: "Admin · Pragma Oracle soon" },
+                { k: "Built for",  v: "Starknet Resolve Hackathon" },
+              ].map(r => (
+                <div key={r.k} className="flex justify-between text-xs">
+                  <span className="text-gray-600">{r.k}</span>
+                  <span className="text-gray-300 font-medium text-right">{r.v}</span>
                 </div>
-              </div>
-            )}
-   {/* AI Market Commentary */}
-   <AICommentary markets={MARKETS} />
+              ))}
+            </div>
 
-            {txStatus && (
-              <div className={`rounded-xl p-4 text-sm text-center border ${
-                txStatus.startsWith("✅") ? "bg-green-900/20 border-green-500/30 text-green-300"
-                : txStatus.startsWith("❌") ? "bg-red-900/20 border-red-500/30 text-red-300"
-                : "bg-amber-900/20 border-amber-500/30 text-amber-300 animate-pulse"
-              }`}>
-                {txStatus}
+            {/* Privacy steps */}
+            <div className="bg-white/3 border border-white/8 rounded-2xl p-5">
+              <p className="text-xs font-semibold text-gray-500 mb-3">🛡️ How Privacy Works</p>
+              <div className="space-y-3">
+                {[
+                  { n:"1", c:"amber", t:"Commit", d:"Submit hash(vote, secret). Your position is invisible on-chain until reveal." },
+                  { n:"2", c:"blue",  t:"Reveal",  d:"After window closes, prove your vote with your secret salt." },
+                  { n:"3", c:"green", t:"Claim",   d:"Winners split the losing pool proportionally. Fully trustless." },
+                ].map(s => (
+                  <div key={s.n} className="flex gap-3">
+                    <span className={`text-xs font-black shrink-0 mt-0.5 ${s.c==="amber"?"text-amber-400":s.c==="blue"?"text-blue-400":"text-green-400"}`}>{s.n}.</span>
+                    <div>
+                      <p className={`text-xs font-semibold ${s.c==="amber"?"text-amber-400":s.c==="blue"?"text-blue-400":"text-green-400"}`}>{s.t}</p>
+                      <p className="text-xs text-gray-600 leading-relaxed">{s.d}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
 
-      <footer className="border-t border-white/5 mt-8 px-6 py-4 text-center text-xs text-gray-600">
-        ShadowTrade • Built for Starknet Resolve Hackathon • Powered by Pedersen Hash • Not financial advice
+      {/* Toast */}
+      {txStatus && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
+          <div className={`px-6 py-3 rounded-2xl text-sm font-semibold shadow-2xl border backdrop-blur-xl ${
+            txStatus.startsWith("✅") ? "bg-green-900/90 border-green-500/30 text-green-300"
+            : txStatus.startsWith("❌") ? "bg-red-900/90 border-red-500/30 text-red-300"
+            : "bg-amber-900/90 border-amber-500/30 text-amber-300 animate-pulse"
+          }`}>
+            {txStatus}
+            <button onClick={() => setTxStatus(null)} className="ml-4 opacity-50 hover:opacity-100">✕</button>
+          </div>
+        </div>
+      )}
+
+      <footer className="border-t border-white/5 mt-6 px-6 py-4 text-center text-xs text-gray-700">
+        ShadowTrade · Built for Starknet Resolve Hackathon · Powered by Pedersen Hash · Not financial advice
       </footer>
     </div>
   );
