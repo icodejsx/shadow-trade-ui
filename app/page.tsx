@@ -13,15 +13,12 @@ import { GiOnTarget } from "react-icons/gi";
 import { FaChartLine } from "react-icons/fa6";
 import { IoStatsChartOutline } from "react-icons/io5";
 
-
-// ── 14 REAL DEPLOYED CONTRACTS ──────────────────────────────────────────────
-// DEMO contract for live demo use
 const DEMO_CONTRACT = "0x02048548a359413c764dace52c44cab112f49c0ac78761e9f6e5c91a2027803d";
 
 const CATEGORIES = [
   {
     id: "demo",
-    icon: <PiCurrencyBtc  className="text-yellow-600" />,
+    icon: <PiCurrencyBtc className="text-yellow-600" />,
     title: "LIVE DEMO — Will BTC close above $60k today?",
     subtitle: "Demo market · Short window for live testing",
     vol: "$0", ends: "Today", tag: "🔴 DEMO",
@@ -85,7 +82,7 @@ const CATEGORIES = [
   },
   {
     id: "dominance",
-    icon:<IoStatsChartOutline className="text-yellow-600"/>    ,
+    icon: <IoStatsChartOutline className="text-yellow-600" />,
     title: "BTC dominance above 60% in 2026?",
     subtitle: "Bitcoin's share of total crypto market cap",
     vol: "$7.1M", ends: "Apr 25, 2026", tag: "New",
@@ -99,22 +96,11 @@ const CATEGORIES = [
   },
 ];
 
-// Total market count — defined at module level so it's available everywhere
 const TOTAL_MARKETS = CATEGORIES.reduce((a,c) => a + c.rows.length, 0);
 
 type Row = typeof CATEGORIES[0]["rows"][0];
 type Category = typeof CATEGORIES[0];
 
-function formatsBTC(raw: unknown): string {
-  if (!raw) return "0";
-  try {
-    const val = BigInt(raw as bigint);
-    if (val === BigInt(0)) return "0";
-    return (val / BigInt("1000000000000000000")).toString();
-  } catch { return "0"; }
-}
-
-// ── Countdown hook ───────────────────────────────────────────────────────────
 function useCountdown(deadline: number) {
   const [tick, setTick] = useState(Math.floor(Date.now()/1000));
   useEffect(() => {
@@ -127,7 +113,7 @@ function useCountdown(deadline: number) {
   const hours = Math.floor((secs % 86400) / 3600);
   const mins  = Math.floor((secs % 3600) / 60);
   const s     = secs % 60;
-  const urgent = secs < 3600; // less than 1 hour = urgent red
+  const urgent = secs < 3600;
   let str = "";
   if (days > 0)       str = `${days}d ${hours}h ${mins}m`;
   else if (hours > 0) str = `${hours}h ${mins}m ${s.toString().padStart(2,"0")}s`;
@@ -135,7 +121,6 @@ function useCountdown(deadline: number) {
   return { str, urgent, days, hours, mins, secs: s };
 }
 
-// ── Single market row ────────────────────────────────────────────────────────
 function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, onNo }: {
   row: Row; staticVol: string; isSelected: boolean;
   selectedVote: "1"|"2"|null; btcPrice: number;
@@ -169,11 +154,9 @@ function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, 
     : now <= rd ? "Reveal"
     : resolved  ? "Resolved" : "Ended";
 
-  // Live countdown — shows commit deadline during Commit phase, reveal deadline during Reveal
   const activeDL = phase === "Commit" ? cd : phase === "Reveal" ? rd : 0;
   const countdown = useCountdown(activeDL);
 
-  // Distance calc for price target rows
   const priceMatch = row.label.match(/\$([\d,]+)/);
   let awayEl = null;
   if (priceMatch && btcPrice) {
@@ -194,8 +177,6 @@ function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, 
         </div>
       </td>
       <td className="py-3 px-2 text-xs text-gray-600 whitespace-nowrap">{staticVol}</td>
-
-      {/* Phase + countdown */}
       <td className="py-3 px-2">
         <div className="flex flex-col gap-0.5">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap w-fit ${
@@ -207,13 +188,10 @@ function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, 
           {activeDL > 0 && countdown.str !== "Ended" && (
             <span className={`text-xs font-mono tabular-nums whitespace-nowrap ${
               countdown.urgent ? "text-red-400 animate-pulse" : "text-gray-500"
-            }`}>
-        
-            </span>
+            }`}>⏱ {countdown.str}</span>
           )}
         </div>
       </td>
-
       <td className="py-3 px-2 text-right">
         <span className="text-green-400 font-bold text-sm">{yesPct}%</span>
       </td>
@@ -235,34 +213,22 @@ function MarketRow({ row, staticVol, isSelected, selectedVote, btcPrice, onYes, 
   );
 }
 
-// ── Big countdown for trade panel ────────────────────────────────────────────
 function CommitCountdown({ deadline }: { deadline: number }) {
   const cd = useCountdown(deadline);
-
   if (deadline === 0) return null;
-
   return (
     <div className={`rounded-xl border p-3 text-center ${
-      cd.urgent
-        ? "bg-red-500/10 border-red-500/30 animate-pulse"
-        : "bg-amber-500/5 border-amber-500/20"
+      cd.urgent ? "bg-red-500/10 border-red-500/30 animate-pulse" : "bg-amber-500/5 border-amber-500/20"
     }`}>
       <p className={`text-xs font-semibold mb-1 ${cd.urgent ? "text-red-400" : "text-amber-400"}`}>
         {cd.urgent ? "⚠️ Closing soon!" : "⏱ Commit window closes in"}
       </p>
-      <p className={`text-2xl font-black font-mono tabular-nums tracking-tight ${
-        cd.urgent ? "text-red-300" : "text-white"
-      }`}>
+      <p className={`text-2xl font-black font-mono tabular-nums tracking-tight ${cd.urgent ? "text-red-300" : "text-white"}`}>
         {cd.str === "Ended" ? "Closed" : cd.str}
       </p>
       {!cd.urgent && cd.days > 0 && (
         <div className="flex justify-center gap-4 mt-2">
-          {[
-            { v: cd.days,  l: "DAYS"  },
-            { v: cd.hours, l: "HRS"   },
-            { v: cd.mins,  l: "MINS"  },
-            { v: cd.secs,  l: "SECS"  },
-          ].map(({ v, l }) => (
+          {[{ v: cd.days, l: "DAYS" },{ v: cd.hours, l: "HRS" },{ v: cd.mins, l: "MINS" },{ v: cd.secs, l: "SECS" }].map(({ v, l }) => (
             <div key={l} className="text-center">
               <p className="text-lg font-black text-white font-mono tabular-nums">{String(v).padStart(2,"0")}</p>
               <p className="text-xs text-gray-600">{l}</p>
@@ -274,7 +240,6 @@ function CommitCountdown({ deadline }: { deadline: number }) {
   );
 }
 
-// ── Category block ───────────────────────────────────────────────────────────
 function CategoryBlock({ cat, selectedKey, selectedVote, btcPrice, onSelect }: {
   cat: typeof CATEGORIES[0];
   selectedKey: string | null; selectedVote: "1"|"2"|null; btcPrice: number;
@@ -286,18 +251,15 @@ function CategoryBlock({ cat, selectedKey, selectedVote, btcPrice, onSelect }: {
 
   return (
     <div className={`border rounded-2xl overflow-hidden mb-4 ${isDemo ? "border-purple-500/30 bg-purple-500/5" : "border-white/8 bg-white/3"}`}>
-      {/* Category-level countdown banner */}
       {cat.commitDeadline && cd.str !== "Ended" && (
         <div className={`px-5 py-2 flex items-center justify-between border-b ${
-          cd.urgent ? "bg-red-500/10 border-red-500/20" 
+          cd.urgent ? "bg-red-500/10 border-red-500/20"
           : isDemo  ? "bg-purple-500/10 border-purple-500/20"
           : "bg-white/3 border-white/5"
         }`}>
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-semibold ${cd.urgent ? "text-red-400 animate-pulse" : isDemo ? "text-purple-400" : "text-gray-500"}`}>
-              {cd.urgent ? "⚠️ Closing soon!" : "⏱ Commit closes in"}
-            </span>
-          </div>
+          <span className={`text-xs font-semibold ${cd.urgent ? "text-red-400 animate-pulse" : isDemo ? "text-purple-400" : "text-gray-500"}`}>
+            {cd.urgent ? "⚠️ Closing soon!" : "⏱ Commit closes in"}
+          </span>
           <span className={`text-sm font-black font-mono tabular-nums ${
             cd.urgent ? "text-red-300" : isDemo ? "text-purple-300" : "text-white"
           }`}>{cd.str}</span>
@@ -309,7 +271,6 @@ function CategoryBlock({ cat, selectedKey, selectedVote, btcPrice, onSelect }: {
           <span className="text-xs font-mono text-blue-400">Reveal open</span>
         </div>
       )}
-
       <button onClick={() => setCollapsed(c => !c)}
         className="w-full px-5 py-4 flex items-center gap-4 hover:bg-white/3 transition-colors text-left">
         <span className="text-xl shrink-0">{cat.icon}</span>
@@ -360,7 +321,6 @@ function CategoryBlock({ cat, selectedKey, selectedVote, btcPrice, onSelect }: {
   );
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
@@ -387,7 +347,7 @@ export default function Home() {
     const iv = setInterval(() => setNow(Math.floor(Date.now()/1000)), 1000);
     return () => clearInterval(iv);
   }, []);
-  // Auto-generate a secret when a market is selected
+
   useEffect(() => {
     if (!selectedKey) return;
     const storageKey = `shadowtrade_secret_${selectedKey}`;
@@ -396,16 +356,16 @@ export default function Home() {
       setSecret(existing);
       setSavedSecret(existing);
     } else {
-      // Generate a cryptographically random secret
       const arr = new Uint8Array(16);
       window.crypto.getRandomValues(arr);
       const generated = "0x" + Array.from(arr).map(b => b.toString(16).padStart(2,"0")).join("");
       setSecret(generated);
       setSavedSecret(generated);
       localStorage.setItem(storageKey, generated);
-      localStorage.setItem("shadowtrade_secret", generated); // keep legacy key for reveal
+      localStorage.setItem("shadowtrade_secret", generated);
     }
   }, [selectedKey]);
+
   useEffect(() => {
     const fetch_ = async () => {
       try {
@@ -426,19 +386,18 @@ export default function Home() {
       const r = await fetch("/api/commentary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ btcPrice, btcChange, TOTAL_MARKETS }),
+        body: JSON.stringify({ btcPrice, btcChange, totalMarkets: TOTAL_MARKETS }),
       });
       const d = await r.json();
       setCommentary(d.commentary || "");
     } catch {
-      setCommentary(`BTC at $${btcPrice.toLocaleString()} (${btcChange>=0?"+":""}${btcChange}% 24h) — ${TOTAL_MARKETS} live markets on-chain across price targets, daily closes, ATH, and dominance. Commit-reveal ensures no position is visible until reveal, eliminating front-running entirely.`);
+      setCommentary(`BTC at $${btcPrice.toLocaleString()} (${btcChange>=0?"+":""}${btcChange}% 24h) — ${TOTAL_MARKETS} live markets on-chain. Commit-reveal ensures no position is visible until reveal, eliminating front-running entirely.`);
     }
     setCommLoading(false);
-  }, [btcPrice, btcChange, TOTAL_MARKETS]);
+  }, [btcPrice, btcChange]);
 
   useEffect(() => { if (btcPrice) fetchCommentary(); }, [btcPrice]);
 
-  // Derive selected contract address from key
   const getSelectedAddress = (): string => {
     if (!selectedKey) return CATEGORIES[0].rows[0].address;
     const parts = selectedKey.split("-");
@@ -509,7 +468,7 @@ export default function Home() {
         { contractAddress: selectedAddress, entrypoint: "commit", calldata: [commitment, stake, "0"] },
       ]);
       setTxStatus("✅ Committed! Come back to reveal.");
-    } catch (e) { console.error(e); setTxStatus("Failed. See console."); }
+    } catch (e) { console.error(e); setTxStatus("❌ Failed. See console."); }
   };
 
   const handleReveal = async () => {
@@ -520,7 +479,7 @@ export default function Home() {
       setTxStatus("⏳ Revealing...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "reveal", calldata: [v==="1"?"1":"2", s] }]);
       setTxStatus("✅ Revealed!");
-    } catch (e) { console.error(e); setTxStatus(" Reveal failed."); }
+    } catch (e) { console.error(e); setTxStatus("❌ Reveal failed."); }
   };
 
   const handleClaim = async () => {
@@ -528,7 +487,7 @@ export default function Home() {
       setTxStatus("⏳ Claiming...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "claim", calldata: [] }]);
       setTxStatus("✅ Claimed!");
-    } catch (e) { console.error(e); setTxStatus(" Claim failed."); }
+    } catch (e) { console.error(e); setTxStatus("❌ Claim failed."); }
   };
 
   const filters = ["All", "Bitcoin", "Crypto Prices", "ATH", "Ending Soon"];
@@ -542,7 +501,6 @@ export default function Home() {
     return true;
   });
 
-  
   return (
     <div className="min-h-screen text-white" style={{ background: "#0d0d0d", fontFamily: "'DM Sans', sans-serif" }}>
       <style>{`
@@ -590,15 +548,20 @@ export default function Home() {
           </div>
           <div className="hidden md:flex flex-1 max-w-xs">
             <div className="relative w-full">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">{<IoIosSearch />}</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600"><IoIosSearch /></span>
               <input value={searchQ} onChange={e => setSearchQ(e.target.value)}
                 placeholder="Search markets..."
                 className="w-full bg-white/5 border border-white/8 rounded-xl pl-8 pr-4 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-amber-500/30 transition-all"/>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-500 bg-white/3 border border-white/8 rounded-lg px-2.5 py-1.5">
-              <span className="text-green-400">●</span> Sepolia
+            {/* ── Pulsing LIVE badge ── */}
+            <div className="hidden lg:flex items-center gap-2 text-xs font-medium text-green-400 bg-green-500/5 border border-green-500/20 rounded-lg px-2.5 py-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400"></span>
+              </span>
+              Sepolia Live
             </div>
             {!isConnected ? (
               <div className="relative">
@@ -647,14 +610,18 @@ export default function Home() {
 
         {/* AI Commentary */}
         <div className="bg-white/3 border border-white/8 rounded-2xl px-5 py-3.5 mb-5 flex items-start gap-3">
-          <span className="text-base shrink-0 mt-0.5">{<BsRobot/>}</span>
+          <span className="text-base shrink-0 mt-0.5"><BsRobot /></span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-xs font-semibold text-gray-500">AI Market Commentary</span>
               <span className="text-xs font-mono text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
                 BTC ${btcPrice.toLocaleString()} {btcChange>=0?"▲":"▼"}{Math.abs(btcChange)}%
               </span>
-              <span className="text-xs text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-green-400 bg-green-500/5 border border-green-500/20 px-2 py-0.5 rounded-full flex items-center gap-1.5">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-400"></span>
+                </span>
                 {TOTAL_MARKETS} contracts live
               </span>
             </div>
@@ -667,26 +634,22 @@ export default function Home() {
             className="text-xs text-gray-600 hover:text-gray-400 shrink-0 transition-colors disabled:opacity-30">↻</button>
         </div>
 
-        {/* Two-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-
           {/* LEFT */}
           <div className="lg:col-span-2">
-            {/* Stats */}
             <div className="grid grid-cols-3 gap-3 mb-5">
               {[
-                { label: "Total Volume",   value: "$127M+",        sub: "across all markets"    },
-                { label: "Live Contracts", value: `${TOTAL_MARKETS}`, sub: "deployed on Starknet" },
-                { label: "Privacy",        value: "Pedersen Hash", sub: "commit-reveal protocol" },
+                { label: "Total Volume",   value: "$127M+",          sub: "across all markets"    },
+                { label: "Live Contracts", value: `${TOTAL_MARKETS}`, sub: "deployed on Starknet"  },
+                { label: "Privacy",        value: "Pedersen Hash",   sub: "commit-reveal protocol" },
               ].map(s => (
-                <div key={s.label} className="bg-white/3 border  border-white/8 rounded-xl p-4">
+                <div key={s.label} className="bg-white/3 border border-white/8 rounded-xl p-4">
                   <p className="text-xs text-gray-500 mb-1">{s.label}</p>
                   <p className="font-black text-white text-lg leading-none">{s.value}</p>
                   <p className="text-xs text-gray-500 mt-1">{s.sub}</p>
                 </div>
               ))}
             </div>
-
             {filteredCats.length === 0
               ? <div className="text-center py-16 text-gray-600">No markets match "{searchQ}"</div>
               : filteredCats.map(cat => (
@@ -699,10 +662,8 @@ export default function Home() {
             }
           </div>
 
-          {/* RIGHT — sticky trade panel */}
+          {/* RIGHT */}
           <div className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto space-y-4 pb-6 no-scrollbar">
-
-            {/* Trade box */}
             <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden">
               <div className="px-5 py-4 border-b border-white/5">
                 {selectedKey ? (
@@ -713,14 +674,13 @@ export default function Home() {
                       <span className={`inline-block mt-1.5 text-xs px-2 py-0.5 rounded-full border font-semibold ${
                         selectedVote==="1" ? "bg-green-500/10 border-green-500/20 text-green-400"
                         : "bg-red-500/10 border-red-500/20 text-red-400"
-                      }`}>Buying {selectedVote==="1"?"YES ":"NO "}</span>
+                      }`}>Buying {selectedVote==="1"?"YES ✅":"NO ❌"}</span>
                     )}
                   </div>
                 ) : (
                   <p className="text-sm text-gray-600 py-1">← Pick YES or NO on any market</p>
                 )}
               </div>
-
               <div className="p-5">
                 {!isConnected ? (
                   <div className="text-center py-3">
@@ -757,20 +717,17 @@ export default function Home() {
 
                     {phase==="Commit" && !hasCommitted && (
                       <>
-                        {/* Countdown banner */}
                         <CommitCountdown deadline={commitDL} />
-
                         <div className="grid grid-cols-2 gap-2">
                           <button onClick={() => setSelectedVote("1")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="1"?"bg-green-600 border-green-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-green-500/30"}`}>
-                            YES
+                            YES ✅
                           </button>
                           <button onClick={() => setSelectedVote("2")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="2"?"bg-red-600 border-red-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-red-500/30"}`}>
-                            NO 
+                            NO ❌
                           </button>
                         </div>
-                        {/* Auto-generated secret — no user action needed */}
                         <div className="bg-black/30 border border-white/8 rounded-xl p-3">
                           <div className="flex items-center justify-between mb-1.5">
                             <div className="flex items-center gap-1.5">
@@ -778,21 +735,13 @@ export default function Home() {
                               <span className="text-xs font-semibold text-gray-400">Your Private Key</span>
                               <span className="text-xs bg-green-500/10 border border-green-500/20 text-green-400 px-1.5 py-0.5 rounded-full">Auto-saved</span>
                             </div>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(secret);
-                                setSecretCopied(true);
-                                setTimeout(() => setSecretCopied(false), 2000);
-                              }}
-                              className="text-xs text-gray-600 hover:text-amber-400 transition-colors"
-                            >
+                            <button onClick={() => { navigator.clipboard.writeText(secret); setSecretCopied(true); setTimeout(() => setSecretCopied(false), 2000); }}
+                              className="text-xs text-gray-600 hover:text-amber-400 transition-colors">
                               {secretCopied ? "✓ Copied!" : "Copy"}
                             </button>
                           </div>
                           <p className="text-xs font-mono text-gray-500 break-all leading-relaxed">{secret || "Generating..."}</p>
-                          <p className="text-xs text-gray-700 mt-2">
-                            🛡️ Generated locally · Saved in your browser · Used to prove your vote at reveal
-                          </p>
+                          <p className="text-xs text-gray-700 mt-2">🛡️ Generated locally · Saved in your browser · Used to prove your vote at reveal</p>
                         </div>
                         <div>
                           <label className="text-xs text-gray-500 block mb-1.5">Amount (sBTC)</label>
@@ -820,7 +769,6 @@ export default function Home() {
                         <p className="text-gray-600 text-xs mt-1">Reveal opens in <span className="font-mono text-gray-400">{fmtTL(commitDL)}</span></p>
                       </div>
                     )}
-
                     {phase==="Reveal" && hasCommitted && !hasRevealed && (
                       <div className="space-y-2">
                         <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 text-xs">
@@ -832,7 +780,6 @@ export default function Home() {
                         </button>
                       </div>
                     )}
-
                     {resolved && hasRevealed && !hasClaimed && (
                       <button onClick={handleClaim}
                         className="w-full bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 text-white font-black py-3.5 rounded-xl transition-all shadow-lg shadow-green-500/20 text-sm">
@@ -851,7 +798,7 @@ export default function Home() {
                     )}
                     {resolved && (
                       <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 text-center">
-                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":" NO Won"}</p>
+                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":"❌ NO Won"}</p>
                       </div>
                     )}
                   </div>
@@ -859,7 +806,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* About */}
             <div className="bg-white/3 border border-white/8 rounded-2xl p-5 space-y-2.5">
               <p className="text-xs font-semibold text-gray-500 mb-3">About ShadowTrade</p>
               {[
@@ -876,7 +822,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Privacy steps */}
             <div className="bg-white/3 border border-white/8 rounded-2xl p-5">
               <p className="text-xs font-semibold text-gray-500 mb-3">🛡️ How Privacy Works</p>
               <div className="space-y-3">
