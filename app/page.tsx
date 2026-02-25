@@ -342,6 +342,7 @@ export default function Home() {
   const [commLoading, setCommLoading]   = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchQ, setSearchQ]           = useState("");
+  const [refreshKey, setRefreshKey]     = useState(0);
 
   useEffect(() => {
     const iv = setInterval(() => setNow(Math.floor(Date.now()/1000)), 1000);
@@ -416,17 +417,30 @@ export default function Home() {
 
   const selectedAddress = getSelectedAddress();
 
-  const { data: selMktRaw } = useReadContract({
+  const { data: selMktRaw, refetch: refetchMkt } = useReadContract({
     address: selectedAddress as `0x${string}`,
     abi: SHADOW_TRADE_ABI, functionName: "get_market_info", args: [], watch: true,
     enabled: !!selectedKey,
   });
-  const { data: selUserRaw } = useReadContract({
+  const { data: selUserRaw, refetch: refetchUser } = useReadContract({
     address: selectedAddress as `0x${string}`,
     abi: SHADOW_TRADE_ABI, functionName: "get_user_info",
     args: address ? [address] : undefined,
     enabled: !!address && !!selectedKey, watch: true,
   });
+
+  // Aggressive polling after tx — poll every 3s for 30s until state changes
+  useEffect(() => {
+    if (refreshKey === 0) return;
+    let attempts = 0;
+    const poll = setInterval(() => {
+      refetchMkt();
+      refetchUser();
+      attempts++;
+      if (attempts >= 10) clearInterval(poll); // stop after 30s
+    }, 3000);
+    return () => clearInterval(poll);
+  }, [refreshKey]);
 
   const sm = selMktRaw  as Record<string,unknown> | undefined;
   const su = selUserRaw as Record<string,unknown> | undefined;
@@ -467,8 +481,10 @@ export default function Home() {
         { contractAddress: SBTC_ADDRESS, entrypoint: "approve", calldata: [selectedAddress, stake, "0"] },
         { contractAddress: selectedAddress, entrypoint: "commit", calldata: [commitment, stake, "0"] },
       ]);
-      setTxStatus("✅ Committed! Come back to reveal.");
-    } catch (e) { console.error(e); setTxStatus("❌ Failed. See console."); }
+      setTxStatus("Committed! Updating...");
+      setRefreshKey(k => k + 1);
+      setTimeout(() => setTxStatus(" Vote committed on-chain! Return to reveal when window opens."), 5000);
+    } catch (e) { console.error(e); setTxStatus("Failed. See console."); }
   };
 
   const handleReveal = async () => {
@@ -478,16 +494,19 @@ export default function Home() {
     try {
       setTxStatus("⏳ Revealing...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "reveal", calldata: [v==="1"?"1":"2", s] }]);
-      setTxStatus("✅ Revealed!");
-    } catch (e) { console.error(e); setTxStatus("❌ Reveal failed."); }
+      setTxStatus(" Revealed! Updating...");
+      setRefreshKey(k => k + 1);
+      setTimeout(() => setTxStatus(" Vote revealed! Claim when resolved."), 5000);
+    } catch (e) { console.error(e); setTxStatus(" Reveal failed."); }
   };
 
   const handleClaim = async () => {
     try {
       setTxStatus("⏳ Claiming...");
       await sendAsync([{ contractAddress: selectedAddress, entrypoint: "claim", calldata: [] }]);
-      setTxStatus("✅ Claimed!");
-    } catch (e) { console.error(e); setTxStatus("❌ Claim failed."); }
+      setTxStatus("Claimed!");
+      setRefreshKey(k => k + 1);
+    } catch (e) { console.error(e); setTxStatus(" Claim failed."); }
   };
 
   const filters = ["All", "Bitcoin", "Crypto Prices", "ATH", "Ending Soon"];
@@ -674,7 +693,7 @@ export default function Home() {
                       <span className={`inline-block mt-1.5 text-xs px-2 py-0.5 rounded-full border font-semibold ${
                         selectedVote==="1" ? "bg-green-500/10 border-green-500/20 text-green-400"
                         : "bg-red-500/10 border-red-500/20 text-red-400"
-                      }`}>Buying {selectedVote==="1"?"YES ✅":"NO ❌"}</span>
+                      }`}>Buying {selectedVote==="1"?"YES ":"NO "}</span>
                     )}
                   </div>
                 ) : (
@@ -699,7 +718,7 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex gap-1.5 flex-wrap">
+                    <div className="flex gap-1.5 flex-wrap items-center">
                       {[
                         { label: hasCommitted?"✓ Committed":"Not committed", on: hasCommitted, c:"green"  },
                         { label: hasRevealed?"✓ Revealed":"Not revealed",    on: hasRevealed,  c:"blue"   },
@@ -713,6 +732,12 @@ export default function Home() {
                             : "bg-white/5 border-white/10 text-gray-600"
                         }`}>{b.label}</span>
                       ))}
+                      <button
+                        onClick={() => { refetchMkt(); refetchUser(); }}
+                        className="text-xs text-gray-600 hover:text-amber-400 transition-colors ml-auto"
+                        title="Refresh status">
+                        ↻ Refresh
+                      </button>
                     </div>
 
                     {phase==="Commit" && !hasCommitted && (
@@ -721,11 +746,11 @@ export default function Home() {
                         <div className="grid grid-cols-2 gap-2">
                           <button onClick={() => setSelectedVote("1")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="1"?"bg-green-600 border-green-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-green-500/30"}`}>
-                            YES ✅
+                            YES 
                           </button>
                           <button onClick={() => setSelectedVote("2")}
                             className={`py-3 rounded-xl font-bold text-sm border transition-all ${selectedVote==="2"?"bg-red-600 border-red-500 text-white":"bg-white/3 border-white/10 text-gray-400 hover:border-red-500/30"}`}>
-                            NO ❌
+                            NO 
                           </button>
                         </div>
                         <div className="bg-black/30 border border-white/8 rounded-xl p-3">
@@ -798,7 +823,7 @@ export default function Home() {
                     )}
                     {resolved && (
                       <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 text-center">
-                        <p className="text-purple-300 font-bold">{outcome===1?"✅ YES Won":"❌ NO Won"}</p>
+                        <p className="text-purple-300 font-bold">{outcome===1?" YES Won":" NO Won"}</p>
                       </div>
                     )}
                   </div>
@@ -847,8 +872,8 @@ export default function Home() {
       {txStatus && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
           <div className={`px-6 py-3 rounded-2xl text-sm font-semibold shadow-2xl border backdrop-blur-xl ${
-            txStatus.startsWith("✅") ? "bg-green-900/90 border-green-500/30 text-green-300"
-            : txStatus.startsWith("❌") ? "bg-red-900/90 border-red-500/30 text-red-300"
+            txStatus.startsWith("") ? "bg-green-900/90 border-green-500/30 text-green-300"
+            : txStatus.startsWith("") ? "bg-red-900/90 border-red-500/30 text-red-300"
             : "bg-amber-900/90 border-amber-500/30 text-amber-300 animate-pulse"
           }`}>
             {txStatus}
