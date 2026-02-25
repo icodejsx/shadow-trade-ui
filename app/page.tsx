@@ -9,6 +9,10 @@ import { BsRobot } from 'react-icons/bs';
 import { IoIosSearch } from "react-icons/io";
 import { PiCurrencyBtc } from "react-icons/pi";
 import { SlCalender } from "react-icons/sl";
+import { GiOnTarget } from "react-icons/gi";
+import { FaChartLine } from "react-icons/fa6";
+import { IoStatsChartOutline } from "react-icons/io5";
+
 
 // ── 14 REAL DEPLOYED CONTRACTS ──────────────────────────────────────────────
 // DEMO contract for live demo use
@@ -48,7 +52,7 @@ const CATEGORIES = [
   },
   {
     id: "price-targets",
-    icon: "🎯",
+    icon: <GiOnTarget className="text-yellow-600" />,
     title: "What price will BTC hit by March?",
     subtitle: "Pick your price target — private commit-reveal voting",
     vol: "$96.6M", ends: "Mar 3, 2026", tag: "Trending",
@@ -67,7 +71,7 @@ const CATEGORIES = [
   },
   {
     id: "ath",
-    icon: "📈",
+    icon: <FaChartLine className="text-yellow-600" />,
     title: "Will Bitcoin hit ATH in 2026?",
     subtitle: "All-time high currently ~$109,000. Does BTC break it this year?",
     vol: "$18.4M", ends: "Mar 26, 2026", tag: "New",
@@ -81,7 +85,7 @@ const CATEGORIES = [
   },
   {
     id: "dominance",
-    icon: "💹",
+    icon:<IoStatsChartOutline className="text-yellow-600"/>    ,
     title: "BTC dominance above 60% in 2026?",
     subtitle: "Bitcoin's share of total crypto market cap",
     vol: "$7.1M", ends: "Apr 25, 2026", tag: "New",
