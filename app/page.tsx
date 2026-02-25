@@ -8,6 +8,7 @@ import { hash } from "starknet";
 import { BsRobot } from 'react-icons/bs';
 import { IoIosSearch } from "react-icons/io";
 import { PiCurrencyBtc } from "react-icons/pi";
+import { SlCalender } from "react-icons/sl";
 
 // ── 14 REAL DEPLOYED CONTRACTS ──────────────────────────────────────────────
 // DEMO contract for live demo use
@@ -30,7 +31,7 @@ const CATEGORIES = [
   },
   {
     id: "daily-price",
-    icon: "📅",
+    icon: <SlCalender className="text-yellow-600" />,
     title: "Bitcoin above $95k on specific date?",
     subtitle: "Predict BTC closing price on a specific day",
     vol: "$5.2M", ends: "Feb 26, 2026", tag: "Ending Soon",
